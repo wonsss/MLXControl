@@ -1,7 +1,7 @@
 import SwiftUI
 import ServiceManagement
 
-// ─────────────────────────── 설정 ───────────────────────────
+// ─────────────────────────── Config ───────────────────────────
 enum Config {
     static let host = "127.0.0.1"
     static let port = 8080
@@ -14,9 +14,9 @@ enum Config {
         return dir + "/mlx_server.log"
     }()
 
-    /// PATH를 탐색해 mlx_lm.server 바이너리를 찾는다.
+    /// Locate the mlx_lm.server binary by searching PATH.
     static let serverBin: String? = findBin("mlx_lm.server")
-    /// PATH를 탐색해 hf(huggingface_hub CLI) 바이너리를 찾는다.
+    /// Locate the hf (huggingface_hub CLI) binary by searching PATH.
     static let hfBin: String? = findBin("hf")
 
     static let fallbackModels = ["mlx-community/Qwen3-32B-4bit"]
@@ -26,7 +26,7 @@ enum Config {
     static let historyLen = 40
 
     private static func findBin(_ name: String) -> String? {
-        // 공통 설치 위치를 우선 탐색한 뒤 PATH 순회
+        // Check common install locations first, then walk PATH
         let candidates = [
             ("~/.local/bin/" + name as NSString).expandingTildeInPath,
             ("~/.local/share/uv/tools/mlx-lm/bin/" + name as NSString).expandingTildeInPath,
@@ -57,8 +57,8 @@ func humanSize(_ bytes: Int?) -> String {
     return gb >= 1 ? String(format: "%.1f GB", gb) : String(format: "%.0f MB", Double(b) / 1_048_576)
 }
 
-// ─────────────────────────── 셸 헬퍼 ───────────────────────────
-// 항상 Process 인자 배열로 실행 — 셸 인터폴레이션 없음.
+// ─────────────────────────── Shell helper ───────────────────────────
+// Always run via Process argument arrays — no shell interpolation.
 @discardableResult
 func sh(_ launch: String, _ args: [String]) -> String {
     let p = Process()
@@ -89,7 +89,7 @@ func allMatches(_ pattern: String, _ text: String) -> [String] {
     }
 }
 
-// UserNotifications 대신 AppleScript — 단, 모든 인자를 리스트로 분리해 주입 차단
+// AppleScript notification — all args fully escaped to block injection
 func notify(_ title: String, _ subtitle: String, _ message: String) {
     func esc(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")
@@ -101,7 +101,7 @@ func notify(_ title: String, _ subtitle: String, _ message: String) {
     ])
 }
 
-// ─────────────── /Applications 설치 유도 (첫 실행) ───────────────
+// ─────────────── Move to /Applications (first launch) ───────────────
 enum MoveToApplications {
     @MainActor
     static func promptIfNeeded() {
@@ -113,12 +113,12 @@ enum MoveToApplications {
         let dest = destDir + "/" + appName
 
         let alert = NSAlert()
-        alert.messageText = "응용 프로그램 폴더로 설치할까요?"
-        alert.informativeText = "MLX Control을 /Applications 로 옮기면 로그인 시 자동 실행이 안정적으로 동작합니다."
-        alert.addButton(withTitle: "설치하고 재실행")
-        alert.addButton(withTitle: "나중에")
+        alert.messageText = "Move to Applications folder?"
+        alert.informativeText = "Moving MLX Control to /Applications makes Launch at Login work reliably."
+        alert.addButton(withTitle: "Move & Relaunch")
+        alert.addButton(withTitle: "Later")
         alert.showsSuppressionButton = true
-        alert.suppressionButton?.title = "다시 묻지 않기"
+        alert.suppressionButton?.title = "Don't ask again"
         NSApp.activate(ignoringOtherApps: true)
         let resp = alert.runModal()
         if alert.suppressionButton?.state == .on {
@@ -135,8 +135,8 @@ enum MoveToApplications {
             if fm.fileExists(atPath: dest) { try fm.removeItem(atPath: dest) }
             try fm.copyItem(atPath: src, toPath: dest)
         } catch {
-            // 권한 부족 시 NSWorkspace AuthorizationAPI로 올려서 복사
-            // (AppleScript 문자열 주입 없이 인자 배열로만 처리)
+            // On copy failure, retry via Process (no AppleScript string injection)
+            
             let rm = Process(); rm.executableURL = URL(fileURLWithPath: "/bin/rm")
             rm.arguments = ["-rf", dest]
             try? rm.run(); rm.waitUntilExit()
@@ -144,12 +144,12 @@ enum MoveToApplications {
             cp.arguments = ["-R", src, dest]
             try? cp.run(); cp.waitUntilExit()
             guard fm.fileExists(atPath: dest) else {
-                notify("⚡ MLX Control", "설치 실패", error.localizedDescription)
+                notify("⚡ MLX Control", "Install failed", error.localizedDescription)
                 return
             }
         }
         let pid = ProcessInfo.processInfo.processIdentifier
-        // Process 인자 배열 — 셸 문자열 인터폴레이션 없음
+        // Process argument array — no shell string interpolation
         let wait = Process()
         wait.executableURL = URL(fileURLWithPath: "/bin/sh")
         wait.arguments = ["-c",
@@ -172,7 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-// ─────────────────────────── 컨트롤러 ───────────────────────────
+// ─────────────────────────── Controller ───────────────────────────
 @Observable @MainActor
 final class ServerController {
     var status: ServerStatus = .stopped
@@ -195,7 +195,7 @@ final class ServerController {
     var downloading: String?
     var searchResults: [ModelHit] = []
     var searching = false
-    var toolsWarning: String? = nil    // mlx-lm 미설치 안내
+    var toolsWarning: String? = nil    // shown when mlx-lm is not installed
 
     @ObservationIgnored private var warmedUp = false
     @ObservationIgnored private var alertedRAM = false
@@ -211,19 +211,18 @@ final class ServerController {
         models = detectModels()
         selectedModel = models.first ?? Config.fallbackModels[0]
         loginEnabled = SMAppService.mainApp.status == .enabled
-        refresh()
         Task { @MainActor [weak self] in
             while true {
-                try? await Task.sleep(for: .seconds(3))
                 guard let self else { break }
-                self.refresh()
+                await self.tick()
+                try? await Task.sleep(for: .seconds(3))
             }
         }
     }
 
     private func checkTools() {
         if Config.serverBin == nil {
-            toolsWarning = "mlx_lm.server 를 찾을 수 없습니다.\n설치: pip install mlx-lm"
+            toolsWarning = "mlx_lm.server not found.\nInstall: pip install mlx-lm"
         }
     }
 
@@ -268,54 +267,86 @@ final class ServerController {
         return found.isEmpty ? Config.fallbackModels : found
     }
 
-    func refresh() {
-        let pidStr = sh("/usr/bin/pgrep", ["-f", "mlx_lm.server"])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let foundPid = pidStr.split(separator: "\n").first.flatMap { Int($0) }
-        pid = foundPid
+    /// One poll: gather in background, apply UI state on main.
+    func refresh() { Task { await tick() } }
 
-        if let pid = foundPid {
-            let cmd = sh("/bin/ps", ["-o", "command=", "-p", "\(pid)"])
-            if let m = firstMatch("--model\\s+(\\S+)", in: cmd) { model = m }
-            let stat = sh("/bin/ps", ["-o", "rss=,%cpu=", "-p", "\(pid)"])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let parts = stat.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
-            if parts.count >= 2 {
-                ramGB = (Double(parts[0]) ?? 0) / 1_048_576
-                cpu = Double(parts[1]) ?? 0
-            }
-            uptime = sh("/bin/ps", ["-o", "etime=", "-p", "\(pid)"])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let httpUp = pingHTTP()
-            status = httpUp ? (warmedUp ? .ready : .up) : .starting
-            readTPS()
+    func tick() async {
+        let snap = await Task.detached(priority: .utility) { Self.gather() }.value
+        apply(snap)
+    }
+
+    private struct Snapshot: Sendable {
+        var pid: Int?
+        var model = ""
+        var ramGB = 0.0
+        var cpu = 0.0
+        var uptime = ""
+        var httpUp = false
+        var tps: Double?
+        var gpuUtil: Int?
+        var gpuMemGB: Double?
+        var sysUsedGB = 0.0
+    }
+
+    private func apply(_ s: Snapshot) {
+        pid = s.pid
+        if s.pid != nil {
+            model = s.model; ramGB = s.ramGB; cpu = s.cpu; uptime = s.uptime
+            if let t = s.tps { tps = t }
+            status = s.httpUp ? (warmedUp ? .ready : .up) : .starting
         } else {
             status = .stopped; model = ""; ramGB = 0; cpu = 0; uptime = ""
             warmedUp = false; tps = nil
         }
-        readGPU()
-        readSystemMemory()
+        gpuUtil = s.gpuUtil
+        gpuMemGB = s.gpuMemGB
+        gpuHistory.append(Double(s.gpuUtil ?? 0))
+        if gpuHistory.count > Config.historyLen { gpuHistory.removeFirst() }
+        sysUsedGB = s.sysUsedGB
         checkAlerts()
     }
 
-    private func pingHTTP() -> Bool {
+    /// All subprocess calls — must run off the main thread (avoid UI hitches).
+    private nonisolated static func gather() -> Snapshot {
+        var s = Snapshot()
+        let pidStr = sh("/usr/bin/pgrep", ["-f", "mlx_lm.server"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        s.pid = pidStr.split(separator: "\n").first.flatMap { Int($0) }
+        if let pid = s.pid {
+            let cmd = sh("/bin/ps", ["-o", "command=", "-p", "\(pid)"])
+            if let m = firstMatch("--model\\s+(\\S+)", in: cmd) { s.model = m }
+            let stat = sh("/bin/ps", ["-o", "rss=,%cpu=", "-p", "\(pid)"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let parts = stat.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+            if parts.count >= 2 {
+                s.ramGB = (Double(parts[0]) ?? 0) / 1_048_576
+                s.cpu = Double(parts[1]) ?? 0
+            }
+            s.uptime = sh("/bin/ps", ["-o", "etime=", "-p", "\(pid)"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            s.httpUp = pingHTTP()
+            s.tps = readTPS()
+        }
+        let gpu = readGPU(); s.gpuUtil = gpu.0; s.gpuMemGB = gpu.1
+        s.sysUsedGB = readSystemMemory()
+        return s
+    }
+
+    private nonisolated static func pingHTTP() -> Bool {
         let code = sh("/usr/bin/curl",
             ["-s", "-m", "1", "-o", "/dev/null", "-w", "%{http_code}",
              "http://\(Config.host):\(Config.port)/v1/models"])
         return code.trimmingCharacters(in: .whitespacesAndNewlines) == "200"
     }
 
-    private func readGPU() {
+    private nonisolated static func readGPU() -> (Int?, Double?) {
         let io = sh("/usr/sbin/ioreg", ["-r", "-d", "1", "-w", "0", "-c", "IOAccelerator"])
         let utils = allMatches("\"Device Utilization %\"=(\\d+)", io).compactMap { Int($0) }
         let mems = allMatches("\"In use system memory\"=(\\d+)", io).compactMap { Double($0) }
-        gpuUtil = utils.max()
-        gpuMemGB = mems.max().map { $0 / 1_073_741_824 }
-        gpuHistory.append(Double(gpuUtil ?? 0))
-        if gpuHistory.count > Config.historyLen { gpuHistory.removeFirst() }
+        return (utils.max(), mems.max().map { $0 / 1_073_741_824 })
     }
 
-    private func readSystemMemory() {
+    private nonisolated static func readSystemMemory() -> Double {
         let v = sh("/usr/bin/vm_stat", [])
         let pageSize = Double(firstMatch("page size of (\\d+) bytes", in: v) ?? "16384") ?? 16384
         func pages(_ key: String) -> Double {
@@ -323,25 +354,26 @@ final class ServerController {
         }
         let used = (pages("Pages active") + pages("Pages wired down")
                     + pages("Pages occupied by compressor")) * pageSize
-        sysUsedGB = used / 1_073_741_824
+        return used / 1_073_741_824
     }
 
-    private func readTPS() {
+    private nonisolated static func readTPS() -> Double? {
         let tail = sh("/usr/bin/tail", ["-n", "60", Config.logPath])
         if let s = firstMatch("Generation:.*?([0-9.]+) tokens-per-sec", in: tail)
             ?? firstMatch("([0-9.]+) tokens-per-sec", in: tail)
             ?? firstMatch("([0-9.]+) tok/sec", in: tail) {
-            tps = Double(s)
+            return Double(s)
         }
+        return nil
     }
 
     private func checkAlerts() {
         let now = Date()
         if isRunning && ramGB >= Config.ramWarnGB {
             if !alertedRAM && now.timeIntervalSince(lastRAMAlert) > Config.alertCooldown {
-                notify("⚡ MLX 리소스 경고",
+                notify("⚡ MLX Resource Warning",
                        String(format: "MLX RAM %.1f GB", ramGB),
-                       "임계치 \(Int(Config.ramWarnGB)) GB 초과")
+                       "Exceeds \(Int(Config.ramWarnGB)) GB threshold")
                 lastRAMAlert = now; alertedRAM = true
             }
         } else if ramGB < Config.ramWarnGB * 0.9 { alertedRAM = false }
@@ -349,21 +381,21 @@ final class ServerController {
         let free = sysTotalGB - sysUsedGB
         if free <= Config.freeWarnGB {
             if !alertedFree && now.timeIntervalSince(lastFreeAlert) > Config.alertCooldown {
-                notify("⚡ 메모리 부족 경고",
-                       String(format: "여유 RAM %.1f GB", free),
-                       "임계치 \(Int(Config.freeWarnGB)) GB 밑 — 스왑 위험")
+                notify("⚡ Low Memory Warning",
+                       String(format: "Free RAM %.1f GB", free),
+                       "Below \(Int(Config.freeWarnGB)) GB free — swap risk")
                 lastFreeAlert = now; alertedFree = true
             }
         } else if free > Config.freeWarnGB * 1.2 { alertedFree = false }
     }
 
-    // ── 서버 제어 ──
+    // ── Server control ──
     private func launchServer() {
         guard let bin = Config.serverBin else {
-            notify("⚡ MLX Control", "실행 실패", "mlx_lm.server 를 찾을 수 없음. pip install mlx-lm")
+            notify("⚡ MLX Control", "Start failed", "mlx_lm.server not found. pip install mlx-lm")
             return
         }
-        // Process 인자 배열 직접 실행 — zsh -lc 문자열 인터폴레이션 없음
+        // Run binary directly via Process args — no zsh -lc string interpolation
         let log = Config.logPath
         guard let logHandle = FileHandle(forWritingAtPath: log) ??
               ({ FileManager.default.createFile(atPath: log, contents: nil); return FileHandle(forWritingAtPath: log) }())
@@ -381,7 +413,7 @@ final class ServerController {
     func start() {
         guard !isRunning, !busy else { return }
         guard Config.serverBin != nil else {
-            notify("⚡ MLX Control", "실행 실패", "mlx_lm.server 를 찾을 수 없음. pip install mlx-lm")
+            notify("⚡ MLX Control", "Start failed", "mlx_lm.server not found. pip install mlx-lm")
             return
         }
         busy = true; warmedUp = false
@@ -449,12 +481,12 @@ final class ServerController {
         } catch { return (0, false) }
     }
 
-    // ── 모델 추가 / 삭제 ──
+    // ── Model add / delete ──
     func downloadModel(_ repo: String) {
         let r = repo.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !r.isEmpty, downloading == nil else { return }
         guard Config.hfBin != nil else {
-            notify("⚡ MLX Control", "다운로드 실패", "hf CLI 를 찾을 수 없음. pip install huggingface_hub")
+            notify("⚡ MLX Control", "Download failed", "hf CLI not found. pip install huggingface_hub")
             return
         }
         downloading = r
@@ -462,7 +494,7 @@ final class ServerController {
             let ok = await Self.runDownload(r)
             self.downloading = nil
             self.models = self.detectModels()
-            notify("⚡ MLX Control", ok ? "다운로드 완료" : "다운로드 실패", r)
+            notify("⚡ MLX Control", ok ? "Download complete" : "Download failed", r)
         }
     }
 
@@ -482,31 +514,31 @@ final class ServerController {
     func deleteModel(_ repo: String) {
         guard !repo.isEmpty else { return }
         if isRunning && model == repo {
-            notify("⚡ MLX Control", "삭제 불가", "실행 중인 모델 — 먼저 Stop 하세요")
+            notify("⚡ MLX Control", "Cannot delete", "Model is running — Stop it first")
             return
         }
-        // 경로 검증: repo가 HF id 형식(영숫자/하이픈/언더스코어/점/슬래시)인지 확인
+        // Validate repo is an HF id (alphanumeric / - / _ / . / slash)
         let validID = repo.range(of: #"^[A-Za-z0-9._\-]+(\/[A-Za-z0-9._\-]+)?$"#,
                                   options: .regularExpression) != nil
         guard validID else {
-            notify("⚡ MLX Control", "삭제 실패", "잘못된 모델 ID")
+            notify("⚡ MLX Control", "Delete failed", "Invalid model ID")
             return
         }
         let dirName = "models--" + repo.replacingOccurrences(of: "/", with: "--")
         let dir = (Config.hubPath as NSString).appendingPathComponent(dirName)
-        // hub 디렉토리 안에만 삭제 허용 (경로 탈출 방지)
+        // Only allow deletion inside the hub dir (prevent path traversal)
         guard dir.hasPrefix(Config.hubPath + "/") else { return }
 
         let alert = NSAlert()
-        alert.messageText = "모델 삭제"
-        alert.informativeText = "\(repo)\n\n확보될 용량: 약 \(folderSize(dir))\n디스크 캐시에서 완전히 제거됩니다."
+        alert.messageText = "Delete model"
+        alert.informativeText = "\(repo)\n\nReclaims about \(folderSize(dir))\nPermanently removes it from the disk cache."
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "삭제")
-        alert.addButton(withTitle: "취소")
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         if FileManager.default.fileExists(atPath: dir) {
-            // Process 인자 배열 — 셸 문자열 인터폴레이션 없음
+            // Process argument array — no shell string interpolation
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/rm")
             p.arguments = ["-rf", dir]
@@ -525,7 +557,7 @@ final class ServerController {
                                : String(format: "%.0f MB", kb / 1024)
     }
 
-    // ── 모델 검색 (HuggingFace) ──
+    // ── Model search (HuggingFace) ──
     func searchModels(_ query: String) {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !searching else { return }
@@ -628,7 +660,7 @@ final class ServerController {
         } catch { return [] }
     }
 
-    // ── 기타 ──
+    // ── Misc ──
     func copyEndpoint() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(Config.baseURL, forType: .string)
@@ -646,7 +678,7 @@ final class ServerController {
                 try SMAppService.mainApp.register()
             }
         } catch {
-            notify("⚡ MLX Control", "로그인 항목 실패", error.localizedDescription)
+            notify("⚡ MLX Control", "Login item failed", error.localizedDescription)
         }
         loginEnabled = SMAppService.mainApp.status == .enabled
     }
@@ -721,23 +753,23 @@ struct ContentView: View {
             if let m = hit.descr { Text(m).font(.caption).foregroundStyle(.tertiary) }
             Divider()
             ScrollView {
-                Text(hit.prose ?? "설명이 없습니다.")
+                Text(hit.prose ?? "No description available.")
                     .font(.callout).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }.frame(height: 150)
             Divider()
             HStack {
                 if c.models.contains(hit.id) {
-                    Label("설치됨", systemImage: "checkmark.circle.fill")
+                    Label("Installed", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green).font(.caption)
                 } else {
                     Button { c.downloadModel(hit.id); detail = nil } label: {
-                        Label("다운로드", systemImage: "arrow.down.circle")
+                        Label("Download", systemImage: "arrow.down.circle")
                     }.disabled(c.downloading != nil)
                 }
                 Spacer()
                 Button { c.openModelPage(hit.id) } label: {
-                    Label("HF에서 열기", systemImage: "safari")
+                    Label("Open in HF", systemImage: "safari")
                 }.font(.caption)
             }
         }
@@ -747,7 +779,7 @@ struct ContentView: View {
 
     var mainView: some View {
         VStack(alignment: .leading, spacing: 9) {
-            // 도구 미설치 경고
+            // tools-missing warning
             if let w = c.toolsWarning {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
@@ -776,13 +808,13 @@ struct ContentView: View {
 
             Divider()
 
-            Text("MLX 프로세스").font(.caption2).foregroundStyle(.secondary)
+            Text("MLX Process").font(.caption2).foregroundStyle(.secondary)
             StatRow("RAM", c.isRunning ? String(format: "%.1f GB", c.ramGB) : "—",
                     warn: c.ramGB >= Config.ramWarnGB)
             StatRow("CPU", c.isRunning ? String(format: "%.0f %%", c.cpu) : "—")
             StatRow("Speed", c.tps.map { String(format: "%.1f tok/s", $0) } ?? "—")
 
-            Text("시스템 GPU (전체 합산)").font(.caption2).foregroundStyle(.secondary).padding(.top, 2)
+            Text("System GPU (all apps)").font(.caption2).foregroundStyle(.secondary).padding(.top, 2)
             StatRow("GPU", c.gpuUtil.map { "\($0) %" } ?? "—", warn: (c.gpuUtil ?? 0) >= 90)
             Sparkline(data: c.gpuHistory)
             StatRow("GPU mem", c.gpuMemGB.map { String(format: "%.1f GB", $0) } ?? "—")
@@ -803,11 +835,11 @@ struct ContentView: View {
                 }.pickerStyle(.menu).labelsHidden()
                 Button { c.deleteModel(c.selectedModel) } label: { Image(systemName: "trash") }
                     .disabled(c.models.count <= 1 || c.downloading != nil)
-                    .help("선택한 모델 삭제")
+                    .help("Delete selected model")
             }
 
             HStack(spacing: 6) {
-                TextField("모델 검색 (예: llama 3b, qwen coder)", text: $query)
+                TextField("Search models (e.g. llama 3b, qwen coder)", text: $query)
                     .textFieldStyle(.roundedBorder).font(.caption)
                     .onSubmit { c.searchModels(query) }
                 Button { c.searchModels(query) } label: { Image(systemName: "magnifyingglass") }
@@ -816,7 +848,7 @@ struct ContentView: View {
             if c.searching {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
-                    Text("검색 중…").font(.caption2).foregroundStyle(.secondary)
+                    Text("Searching…").font(.caption2).foregroundStyle(.secondary)
                 }
             }
             if !c.searchResults.isEmpty {
@@ -886,7 +918,7 @@ struct ContentView: View {
             }.font(.caption)
 
             Toggle(isOn: Binding(get: { c.loginEnabled }, set: { _ in c.toggleLogin() })) {
-                Text("로그인 시 자동 실행").font(.caption)
+                Text("Launch at Login").font(.caption)
             }.toggleStyle(.switch).controlSize(.mini)
 
             HStack {
