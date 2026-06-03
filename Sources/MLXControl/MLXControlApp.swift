@@ -41,7 +41,7 @@ enum Config {
     }
 }
 
-enum ServerStatus { case stopped, starting, up, warming, ready }
+enum ServerStatus { case stopped, starting, up, ready }
 
 struct ModelHit: Identifiable, Sendable {
     let id: String
@@ -73,8 +73,17 @@ func sh(_ launch: String, _ args: [String]) -> String {
     return String(data: data, encoding: .utf8) ?? ""
 }
 
-func firstMatch(_ pattern: String, in text: String) -> String? {
+// Compiled-regex cache (NSCache is thread-safe; helpers run from background gather()).
+nonisolated(unsafe) private let regexCache = NSCache<NSString, NSRegularExpression>()
+private func compiledRegex(_ pattern: String) -> NSRegularExpression? {
+    if let cached = regexCache.object(forKey: pattern as NSString) { return cached }
     guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }
+    regexCache.setObject(re, forKey: pattern as NSString)
+    return re
+}
+
+func firstMatch(_ pattern: String, in text: String) -> String? {
+    guard let re = compiledRegex(pattern) else { return nil }
     let r = NSRange(text.startIndex..., in: text)
     guard let m = re.firstMatch(in: text, range: r), m.numberOfRanges > 1,
           let g = Range(m.range(at: 1), in: text) else { return nil }
@@ -82,7 +91,7 @@ func firstMatch(_ pattern: String, in text: String) -> String? {
 }
 
 func allMatches(_ pattern: String, _ text: String) -> [String] {
-    guard let re = try? NSRegularExpression(pattern: pattern) else { return [] }
+    guard let re = compiledRegex(pattern) else { return [] }
     let r = NSRange(text.startIndex..., in: text)
     return re.matches(in: text, range: r).compactMap {
         Range($0.range(at: 1), in: text).map { String(text[$0]) }
@@ -240,7 +249,6 @@ final class ServerController {
         case .stopped: return "Stopped"
         case .starting: return "Starting…"
         case .up: return "Up (model not loaded)"
-        case .warming: return "Warming up…"
         case .ready: return "Ready"
         }
     }
@@ -249,7 +257,7 @@ final class ServerController {
         if isWarming { return .orange }
         switch status {
         case .stopped: return .gray
-        case .starting, .warming: return .orange
+        case .starting: return .orange
         case .up: return .yellow
         case .ready: return .green
         }
@@ -313,17 +321,16 @@ final class ServerController {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         s.pid = pidStr.split(separator: "\n").first.flatMap { Int($0) }
         if let pid = s.pid {
-            let cmd = sh("/bin/ps", ["-o", "command=", "-p", "\(pid)"])
-            if let m = firstMatch("--model\\s+(\\S+)", in: cmd) { s.model = m }
-            let stat = sh("/bin/ps", ["-o", "rss=,%cpu=", "-p", "\(pid)"])
+            // Single ps call: numeric cols first, command last (it contains spaces).
+            let line = sh("/bin/ps", ["-o", "rss=,%cpu=,etime=,command=", "-p", "\(pid)"])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let parts = stat.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
-            if parts.count >= 2 {
+            let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
+            if parts.count >= 4 {
                 s.ramGB = (Double(parts[0]) ?? 0) / 1_048_576
                 s.cpu = Double(parts[1]) ?? 0
+                s.uptime = String(parts[2])
+                if let m = firstMatch("--model\\s+(\\S+)", in: String(parts[3])) { s.model = m }
             }
-            s.uptime = sh("/bin/ps", ["-o", "etime=", "-p", "\(pid)"])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
             s.httpUp = pingHTTP()
             s.tps = readTPS()
         }

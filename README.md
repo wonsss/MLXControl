@@ -2,10 +2,14 @@
 
 A native macOS menu bar app to manage your local [mlx-lm](https://github.com/ml-explore/mlx-lm) inference server — start, stop, monitor resources, and download models, all without touching the terminal.
 
+[![build](https://github.com/wonsss/MLXControl/actions/workflows/build.yml/badge.svg)](https://github.com/wonsss/MLXControl/actions/workflows/build.yml)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-required-orange)
 ![Swift 6](https://img.shields.io/badge/Swift-6-red)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
+
+<!-- Add a screenshot of the menu bar popover here: -->
+<!-- ![MLX Control](docs/screenshot.png) -->
 
 ## Features
 

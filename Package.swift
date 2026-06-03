@@ -5,6 +5,7 @@ let package = Package(
     name: "MLXControl",
     platforms: [.macOS(.v14)],
     targets: [
-        .executableTarget(name: "MLXControl", path: "Sources/MLXControl")
+        .executableTarget(name: "MLXControl", path: "Sources/MLXControl"),
+        .testTarget(name: "MLXControlTests", dependencies: ["MLXControl"], path: "Tests/MLXControlTests"),
     ]
 )

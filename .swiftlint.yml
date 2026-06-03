@@ -1,0 +1,17 @@
+# SwiftLint config (local dev). Install: brew install swiftlint — then run: swiftlint
+included:
+  - Sources
+  - Tests
+disabled_rules:
+  - todo
+  - trailing_comma
+line_length:
+  warning: 120
+  error: 180
+  ignores_comments: true
+identifier_name:
+  min_length: 1
+type_body_length:
+  warning: 600
+file_length:
+  warning: 1000
