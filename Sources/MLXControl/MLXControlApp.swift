@@ -397,23 +397,43 @@ final class ServerController {
     }
 
     // ── Server control ──
+    @ObservationIgnored private var serverProcess: Process?
+
+    private static func isPortInUse(_ port: Int) -> Bool {
+        let sock = socket(AF_INET, SOCK_STREAM, 0)
+        guard sock >= 0 else { return false }
+        defer { close(sock) }
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(port).bigEndian
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        return withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+            }
+        }
+    }
+
     private func launchServer() {
         guard let bin = Config.serverBin else {
             notify("⚡ MLX Control", "Start failed", "mlx_lm.server not found. pip install mlx-lm")
             return
         }
-        // Run binary directly via Process args — no zsh -lc string interpolation
-        let log = Config.logPath
-        guard let logHandle = FileHandle(forWritingAtPath: log) ??
-              ({ FileManager.default.createFile(atPath: log, contents: nil); return FileHandle(forWritingAtPath: log) }())
-        else { return }
+        // Append to log file via FileHandle kept alive in serverProcess termination handler.
+        let logPath = Config.logPath
+        FileManager.default.createFile(atPath: logPath, contents: nil)
+        guard let logHandle = FileHandle(forWritingAtPath: logPath) else { return }
         logHandle.seekToEndOfFile()
+
         let p = Process()
         p.executableURL = URL(fileURLWithPath: bin)
         p.arguments = ["--model", selectedModel, "--host", Config.host, "--port", "\(Config.port)"]
         p.standardOutput = logHandle
         p.standardError = logHandle
         p.qualityOfService = .userInitiated
+        // Close logHandle only after the process exits — prevents early interpreter shutdown.
+        p.terminationHandler = { _ in try? logHandle.close() }
+        serverProcess = p
         try? p.run()
     }
 
@@ -421,6 +441,11 @@ final class ServerController {
         guard !isRunning, !busy else { return }
         guard Config.serverBin != nil else {
             notify("⚡ MLX Control", "Start failed", "mlx_lm.server not found. pip install mlx-lm")
+            return
+        }
+        if Self.isPortInUse(Config.port) {
+            notify("⚡ MLX Control", "Port \(Config.port) in use",
+                   "Another app (e.g. oMLX) is already on this port. Stop it first.")
             return
         }
         busy = true; warmedUp = false
