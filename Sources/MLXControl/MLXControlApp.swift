@@ -1016,6 +1016,7 @@ struct ContentView: View {
 
             // ── 3. Model picker ───────────────────────────────────────
             VStack(alignment: .leading, spacing: 6) {
+                // Model picker — full width
                 HStack(spacing: 6) {
                     Picker("", selection: Binding(
                         get: { c.selectedModel },
@@ -1030,19 +1031,35 @@ struct ContentView: View {
                             let dot    = feas.map { $0.label } ?? ""
                             Text("\(dot) \(name)\(size.isEmpty ? "" : "  \(size)")").tag(m)
                         }
-                    }.pickerStyle(.menu).labelsHidden()
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
 
-                    Spacer()
+                    Button { c.deleteModel(c.selectedModel) } label: {
+                        Image(systemName: "trash")
+                    }
+                    .foregroundStyle(.red.opacity(0.7))
+                    .disabled(c.models.count <= 1 || c.downloading != nil)
+                    .help("Delete model")
+                }
 
-                    // Controls
+                // Server control buttons — labeled
+                HStack(spacing: 8) {
                     if c.isRunning {
-                        Button { c.warmUp() } label: { Image(systemName: "flame") }
-                            .disabled((c.status != .up && c.status != .ready) || c.isWarming)
-                            .help("Warm up — pre-load model")
-                        Button { c.restart() } label: { Image(systemName: "arrow.clockwise") }
-                            .help("Restart")
-                        Button { c.stop() } label: { Image(systemName: "stop.fill") }
-                            .help("Stop server")
+                        Button { c.stop() } label: {
+                            Label("Stop", systemImage: "stop.fill")
+                        }.buttonStyle(.bordered).controlSize(.small)
+
+                        Button { c.restart() } label: {
+                            Label("Restart", systemImage: "arrow.clockwise")
+                        }.buttonStyle(.bordered).controlSize(.small)
+
+                        Button { c.warmUp() } label: {
+                            Label("Warm up", systemImage: "flame")
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .disabled((c.status != .up && c.status != .ready) || c.isWarming)
                     } else {
                         Button { c.start() } label: {
                             Label("Start", systemImage: "play.fill")
@@ -1050,14 +1067,11 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent).controlSize(.small)
                     }
 
+                    Spacer()
+
                     if c.busy || c.isWarming {
                         ProgressView().controlSize(.small)
                     }
-
-                    Button { c.deleteModel(c.selectedModel) } label: { Image(systemName: "trash") }
-                        .foregroundStyle(.red.opacity(0.7))
-                        .disabled(c.models.count <= 1 || c.downloading != nil)
-                        .help("Delete model")
                 }
 
                 // Search
@@ -1196,11 +1210,13 @@ struct ContentView: View {
                 // Bottom row: log + quit
                 HStack(spacing: 12) {
                     Button { c.openLog() } label: {
-                        Label("Log", systemImage: "doc.text")
+                        Label("Open Log", systemImage: "doc.text")
                     }
                     .help("Open server log")
                     Spacer()
-                    Button("Quit") { NSApplication.shared.terminate(nil) }
+                    Button { NSApplication.shared.terminate(nil) } label: {
+                        Label("Quit", systemImage: "power")
+                    }
                 }.font(.caption).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 12)
