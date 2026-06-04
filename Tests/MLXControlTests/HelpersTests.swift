@@ -33,4 +33,25 @@ final class HelpersTests: XCTestCase {
         XCTAssertFalse(valid("a/b/c"))             // two slashes
         XCTAssertFalse(valid("name with space"))
     }
+
+    @MainActor
+    func testWaitUntilFalseReturnsTrueAfterConditionClears() async {
+        var checks = 0
+        let cleared = await waitUntilFalse(timeout: 0.2, pollInterval: 0.01) {
+            checks += 1
+            return checks < 3
+        }
+
+        XCTAssertTrue(cleared)
+        XCTAssertGreaterThanOrEqual(checks, 3)
+    }
+
+    @MainActor
+    func testWaitUntilFalseReturnsFalseWhenConditionStaysTrue() async {
+        let cleared = await waitUntilFalse(timeout: 0.03, pollInterval: 0.01) {
+            true
+        }
+
+        XCTAssertFalse(cleared)
+    }
 }

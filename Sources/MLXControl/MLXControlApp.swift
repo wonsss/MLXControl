@@ -133,6 +133,21 @@ func allMatches(_ pattern: String, _ text: String) -> [String] {
     }
 }
 
+@MainActor
+func waitUntilFalse(
+    timeout: TimeInterval,
+    pollInterval: TimeInterval,
+    condition: @escaping () -> Bool
+) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while condition() {
+        if Date() >= deadline { return false }
+        let sleepNs = UInt64(max(0.005, pollInterval) * 1_000_000_000)
+        try? await Task.sleep(nanoseconds: sleepNs)
+    }
+    return true
+}
+
 // AppleScript notification — all args fully escaped to block injection
 func notify(_ title: String, _ subtitle: String, _ message: String) {
     func esc(_ s: String) -> String {
@@ -252,6 +267,7 @@ final class ServerController {
     @ObservationIgnored private var lastRAMAlert = Date.distantPast
     @ObservationIgnored private var lastFreeAlert = Date.distantPast
     @ObservationIgnored private var lastActivity = Date.distantPast
+    @ObservationIgnored private var restartAfterBusy = false
 
     var isRunning: Bool { status != .stopped }
 
@@ -503,15 +519,66 @@ final class ServerController {
         }
     }
 
-    private func launchServer() {
+    private static func mlxServerPIDs() -> [Int] {
+        sh("/usr/bin/pgrep", ["-f", "mlx_lm.server"])
+            .split(separator: "\n")
+            .compactMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
+    private static func isMlxServerRunning() -> Bool {
+        !mlxServerPIDs().isEmpty
+    }
+
+    private func stopExistingServersAndWait() async -> Bool {
+        if let serverProcess, serverProcess.isRunning {
+            serverProcess.terminate()
+        }
+        _ = sh("/usr/bin/pkill", ["-TERM", "-f", "mlx_lm.server"])
+
+        let terminated = await waitUntilFalse(timeout: 4, pollInterval: 0.1) {
+            Self.isMlxServerRunning()
+        }
+        if terminated {
+            serverProcess = nil
+            return true
+        }
+
+        _ = sh("/usr/bin/pkill", ["-KILL", "-f", "mlx_lm.server"])
+        let killed = await waitUntilFalse(timeout: 2, pollInterval: 0.1) {
+            Self.isMlxServerRunning()
+        }
+        if killed { serverProcess = nil }
+        return killed
+    }
+
+    private func waitForPortRelease() async -> Bool {
+        await waitUntilFalse(timeout: 3, pollInterval: 0.1) {
+            Self.isPortInUse(Config.port)
+        }
+    }
+
+    private func finishServerTransition() {
+        let hasServer = Self.isMlxServerRunning()
+        busy = false
+        refresh()
+        guard restartAfterBusy, hasServer else {
+            restartAfterBusy = false
+            return
+        }
+        restartAfterBusy = false
+        restart()
+    }
+
+    @discardableResult
+    private func launchServer() -> Bool {
         guard let bin = Config.serverBin else {
             notify("⚡ MLX Control", "Start failed", "mlx_lm.server not found. pip install mlx-lm")
-            return
+            return false
         }
         // Append to log file via FileHandle kept alive in serverProcess termination handler.
         let logPath = Config.logPath
         FileManager.default.createFile(atPath: logPath, contents: nil)
-        guard let logHandle = FileHandle(forWritingAtPath: logPath) else { return }
+        guard let logHandle = FileHandle(forWritingAtPath: logPath) else { return false }
         logHandle.seekToEndOfFile()
 
         let p = Process()
@@ -522,19 +589,21 @@ final class ServerController {
         p.qualityOfService = .userInitiated
         // Close logHandle only after the process exits — prevents early interpreter shutdown.
         p.terminationHandler = { _ in try? logHandle.close() }
-        serverProcess = p
-        try? p.run()
+        do {
+            try p.run()
+            serverProcess = p
+            return true
+        } catch {
+            try? logHandle.close()
+            notify("⚡ MLX Control", "Start failed", error.localizedDescription)
+            return false
+        }
     }
 
     func start() {
         guard !isRunning, !busy else { return }
         guard Config.serverBin != nil else {
             notify("⚡ MLX Control", "Start failed", "mlx_lm.server not found. pip install mlx-lm")
-            return
-        }
-        if Self.isPortInUse(Config.port) {
-            notify("⚡ MLX Control", "Port \(Config.port) in use",
-                   "Another app (e.g. oMLX) is already on this port. Stop it first.")
             return
         }
         // Memory guard: compare model disk size against available system RAM.
@@ -555,36 +624,68 @@ final class ServerController {
             }
         }
         busy = true; warmedUp = false; lastActivity = Date()
-        launchServer()
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(2)); self.busy = false; self.refresh()
+            guard await self.stopExistingServersAndWait() else {
+                self.finishServerTransition()
+                self.notifyStartBlockedByExistingServer()
+                return
+            }
+            guard await self.waitForPortRelease() else {
+                self.finishServerTransition()
+                notify("⚡ MLX Control", "Port \(Config.port) in use",
+                       "Stop the app using this port, then try again.")
+                return
+            }
+            self.launchServer()
+            try? await Task.sleep(for: .seconds(2))
+            self.finishServerTransition()
         }
     }
 
     func stop() {
         guard !busy else { return }
         busy = true
-        _ = sh("/usr/bin/pkill", ["-f", "mlx_lm.server"])
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1.5)); self.busy = false; self.refresh()
+            _ = await self.stopExistingServersAndWait()
+            try? await Task.sleep(for: .seconds(1.5))
+            self.finishServerTransition()
         }
     }
 
     func restart() {
         guard !busy else { return }
         busy = true; warmedUp = false
-        _ = sh("/usr/bin/pkill", ["-f", "mlx_lm.server"])
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(2))
+            guard await self.stopExistingServersAndWait() else {
+                self.finishServerTransition()
+                self.notifyStartBlockedByExistingServer()
+                return
+            }
+            guard await self.waitForPortRelease() else {
+                self.finishServerTransition()
+                notify("⚡ MLX Control", "Port \(Config.port) in use",
+                       "Stop the app using this port, then try again.")
+                return
+            }
             self.launchServer()
             try? await Task.sleep(for: .seconds(2))
-            self.busy = false; self.refresh()
+            self.finishServerTransition()
         }
+    }
+
+    private func notifyStartBlockedByExistingServer() {
+        notify("⚡ MLX Control", "Server still running",
+               "Could not stop the existing mlx_lm.server process. Stop it manually, then try again.")
     }
 
     func switchModel(_ m: String) {
         selectedModel = m
-        if isRunning { restart() }
+        guard isRunning else { return }
+        if busy {
+            restartAfterBusy = true
+        } else {
+            restart()
+        }
     }
 
     // ── Warm-up ──

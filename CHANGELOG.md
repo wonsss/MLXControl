@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](ht
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-04
+### Fixed
+- Ensure only one `mlx_lm.server` instance runs while switching models.
+- Wait for the previous server process and port to stop before launching the selected model.
+- Queue a follow-up restart when the model is changed again during an active transition.
+
 ## [1.3.0] - 2026-06-04
 ### Added
 - Initial public release.
@@ -24,5 +30,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](ht
 ### Performance
 - Polling I/O runs off the main thread (gather/apply split); idle CPU stays near zero.
 
-[Unreleased]: https://github.com/wonsss/MLXControl/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/wonsss/MLXControl/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/wonsss/MLXControl/compare/v0.1.1...v0.1.2
 [1.3.0]: https://github.com/wonsss/MLXControl/releases/tag/v1.3.0
