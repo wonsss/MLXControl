@@ -1,17 +1,27 @@
-# SwiftLint config (local dev). Install: brew install swiftlint — then run: swiftlint
+# SwiftLint config. Install: brew install swiftlint — then run: swiftlint
 included:
   - Sources
   - Tests
 disabled_rules:
   - todo
   - trailing_comma
+  - switch_case_alignment          # SwiftUI inline switch expressions trigger false positives
+  - implicit_optional_initialization  # = nil is explicit intent here, not redundancy
+opt_in_rules:
+  - empty_count
+  - force_unwrapping
 line_length:
-  warning: 120
-  error: 180
+  warning: 130
+  error: 200
   ignores_comments: true
+  ignores_interpolated_strings: true
 identifier_name:
   min_length: 1
 type_body_length:
   warning: 600
 file_length:
-  warning: 1000
+  warning: 1400
+  error: 2000
+cyclomatic_complexity:
+  warning: 15
+  error: 25

@@ -46,7 +46,7 @@ enum Config {
             "/opt/homebrew/bin/" + name,
             "/usr/local/bin/" + name,
         ]
-        for c in candidates { if FileManager.default.isExecutableFile(atPath: c) { return c } }
+        for c in candidates where FileManager.default.isExecutableFile(atPath: c) { return c }
         let paths = ProcessInfo.processInfo.environment["PATH"]?
             .split(separator: ":").map(String.init) ?? []
         return paths.map { $0 + "/" + name }
@@ -671,7 +671,8 @@ final class ServerController {
 
         let alert = NSAlert()
         alert.messageText = "Delete model"
-        alert.informativeText = "\(repo)\n\nReclaims about \(folderSize(dir))\nPermanently removes it from the disk cache."
+        let sizeStr = folderSize(dir)
+        alert.informativeText = "\(repo)\n\nReclaims about \(sizeStr)\nPermanently removes it from the disk cache."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
