@@ -921,190 +921,234 @@ struct ContentView: View {
     }
 
     var mainView: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            // tools-missing warning
-            if let w = c.toolsWarning {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    Text(w).font(.caption2).foregroundStyle(.secondary)
-                }
-                .padding(8).background(.orange.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
+        VStack(alignment: .leading, spacing: 0) {
 
-            HStack(spacing: 8) {
-                Circle().fill(c.statusColor).frame(width: 9, height: 9)
-                Text("MLX Control").font(.headline)
-                Spacer()
-                Text(c.statusText).font(.caption).foregroundStyle(.secondary)
-            }
-            if c.isRunning {
-                HStack {
-                    Text(c.model.replacingOccurrences(of: "mlx-community/", with: ""))
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            // ── 1. Status header ──────────────────────────────────────
+            VStack(alignment: .leading, spacing: 4) {
+                if let w = c.toolsWarning {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text(w).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .padding(7).background(.orange.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+
+                HStack(spacing: 8) {
+                    Text("MLX Control").font(.headline)
                     Spacer()
-                    if !c.uptime.isEmpty {
-                        Text("up \(c.uptime)").font(.caption2).foregroundStyle(.tertiary)
-                    }
+                    Text(c.statusText)
+                        .font(.caption).foregroundStyle(c.statusColor).fontWeight(.medium)
                 }
-            }
-
-            Divider()
-
-            Text("MLX Process").font(.caption2).foregroundStyle(.secondary)
-            StatRow("RAM", c.isRunning ? String(format: "%.1f GB", c.ramGB) : "—",
-                    warn: c.ramGB >= Config.ramWarnGB)
-            StatRow("CPU", c.isRunning ? String(format: "%.0f %%", c.cpu) : "—")
-            StatRow("Speed", c.tps.map { String(format: "%.1f tok/s", $0) } ?? "—")
-
-            Text("System GPU (all apps)").font(.caption2).foregroundStyle(.secondary).padding(.top, 2)
-            StatRow("GPU", c.gpuUtil.map { "\($0) %" } ?? "—", warn: (c.gpuUtil ?? 0) >= 90)
-            Sparkline(data: c.gpuHistory)
-            StatRow("GPU mem", c.gpuMemGB.map { String(format: "%.1f GB", $0) } ?? "—")
-            StatRow("System RAM",
-                    String(format: "%.0f / %.0f GB", c.sysUsedGB, c.sysTotalGB),
-                    warn: c.sysTotalGB > 0 && c.sysUsedGB / c.sysTotalGB > 0.9)
-
-            Divider()
-
-            HStack {
-                Picker("Model", selection: Binding(
-                    get: { c.selectedModel },
-                    set: { c.switchModel($0) }
-                )) {
-                    ForEach(c.models, id: \.self) { m in
-                        let freeGB = c.sysTotalGB - c.sysUsedGB
-                        let sizeB  = c.modelSizes[m]
-                        let feas   = ramFeasibility(modelBytes: sizeB, freeGB: freeGB)
-                        let name   = m.replacingOccurrences(of: "mlx-community/", with: "")
-                        let size   = sizeB != nil ? humanSize(sizeB) : ""
-                        let dot    = feas.map { $0.label } ?? ""
-                        Text("\(dot) \(name)\(size.isEmpty ? "" : "  \(size)")").tag(m)
-                    }
-                }.pickerStyle(.menu).labelsHidden()
-                Button { c.deleteModel(c.selectedModel) } label: { Image(systemName: "trash") }
-                    .disabled(c.models.count <= 1 || c.downloading != nil)
-                    .help("Delete selected model")
-            }
-
-            HStack(spacing: 6) {
-                TextField("Search models (e.g. llama 3b, qwen coder)", text: $query)
-                    .textFieldStyle(.roundedBorder).font(.caption)
-                    .onSubmit { c.searchModels(query) }
-                Button { c.searchModels(query) } label: { Image(systemName: "magnifyingglass") }
-                    .disabled(c.searching || query.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-            if c.searching {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Searching…").font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-            if !c.searchResults.isEmpty {
-                ScrollView {
-                    VStack(spacing: 3) {
-                        ForEach(c.searchResults) { hit in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    Text(hit.id.replacingOccurrences(of: "mlx-community/", with: ""))
-                                        .font(.caption).lineLimit(1)
-                                    HStack(spacing: 4) {
-                                        Text("↓ \(hit.downloads)  ·  \(humanSize(hit.sizeBytes))")
-                                        if let f = ramFeasibility(
-                                            modelBytes: hit.sizeBytes,
-                                            freeGB: c.sysTotalGB - c.sysUsedGB) {
-                                            Text(f.label)
-                                            Text(f == .ok ? "fits" : f == .warn ? "tight" : "too large")
-                                                .foregroundStyle(f.color)
-                                        }
-                                    }.font(.caption2).foregroundStyle(.secondary)
-                                    if let d = hit.descr {
-                                        Text(d).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-                                    }
-                                    if let p = hit.prose {
-                                        Text(p).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                                    }
-                                }
-                                .contentShape(Rectangle())
-                                .onTapGesture { detail = hit }
-                                Spacer()
-                                if c.models.contains(hit.id) {
-                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                                } else {
-                                    Button { c.downloadModel(hit.id) } label: {
-                                        Image(systemName: "arrow.down.circle")
-                                    }.buttonStyle(.borderless).disabled(c.downloading != nil)
-                                }
-                            }
-                            .padding(.vertical, 2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }.frame(maxWidth: .infinity)
-                }
-                .frame(height: 220)
-                .background(Color.primary.opacity(0.04))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-            if let dl = c.downloading {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("downloading \(dl.replacingOccurrences(of: "mlx-community/", with: ""))…")
-                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-
-            HStack {
                 if c.isRunning {
-                    Button { c.stop() } label: { Label("Stop", systemImage: "stop.fill") }
-                    Button { c.restart() } label: { Label("Restart", systemImage: "arrow.clockwise") }
-                    Button { c.warmUp() } label: { Label("Warm", systemImage: "flame.fill") }
-                        .disabled((c.status != .up && c.status != .ready) || c.isWarming)
-                } else {
-                    Button { c.start() } label: { Label("Start", systemImage: "play.fill") }
+                    HStack {
+                        Text(c.model.replacingOccurrences(of: "mlx-community/", with: ""))
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer()
+                        if !c.uptime.isEmpty {
+                            Text("up \(c.uptime)").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
                 }
-                Spacer()
-                if c.busy || c.isWarming { ProgressView().controlSize(.small) }
             }
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 8)
 
             Divider()
 
-            // idle countdown (shown only when server is running + TTL enabled)
-            if !c.idleLabel.isEmpty {
-                Text(c.idleLabel)
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            HStack(spacing: 10) {
-                // Auto-stop toggle + stepper
-                Toggle(isOn: $c.idleTTLEnabled) {
-                    Text("Auto-stop when idle").font(.caption)
-                }.toggleStyle(.switch).controlSize(.mini)
-                if c.idleTTLEnabled {
-                    Stepper(value: $c.idleTTLSeconds, in: 300...7200, step: 300) {
-                        Text("\(c.idleTTLSeconds / 60) min")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }.controlSize(.mini)
+            // ── 2. Metrics ────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 3) {
+                // Process metrics
+                HStack(spacing: 0) {
+                    Label("", systemImage: "memorychip")
+                        .labelStyle(.iconOnly).foregroundStyle(.secondary).frame(width: 20)
+                    Text("Process").font(.caption2).foregroundStyle(.secondary)
                 }
-                Spacer()
-                // Utilities (small icons)
-                Button { c.copyEndpoint() } label: { Image(systemName: "doc.on.doc") }
-                    .help("Copy endpoint (\(Config.baseURL))")
-                Button { c.openLog() } label: { Image(systemName: "doc.text") }
-                    .help("Open log")
-            }.font(.caption)
+                StatRow("RAM",
+                        c.isRunning ? String(format: "%.1f GB", c.ramGB) : "—",
+                        warn: c.ramGB >= Config.ramWarnGB)
+                StatRow("CPU",
+                        c.isRunning ? String(format: "%.0f%%", c.cpu) : "—")
+                StatRow("Speed",
+                        c.tps.map { String(format: "%.1f tok/s", $0) } ?? "—")
 
-            Toggle(isOn: Binding(get: { c.loginEnabled }, set: { _ in c.toggleLogin() })) {
-                Text("Launch at Login").font(.caption)
-            }.toggleStyle(.switch).controlSize(.mini)
+                Spacer().frame(height: 4)
 
-            HStack {
-                Spacer()
-                Button("Quit") { NSApplication.shared.terminate(nil) }.font(.caption)
+                // GPU metrics
+                HStack(spacing: 0) {
+                    Label("", systemImage: "cpu")
+                        .labelStyle(.iconOnly).foregroundStyle(.secondary).frame(width: 20)
+                    Text("System GPU").font(.caption2).foregroundStyle(.secondary)
+                }
+                StatRow("Utilization",
+                        c.gpuUtil.map { "\($0)%" } ?? "—",
+                        warn: (c.gpuUtil ?? 0) >= 90)
+                Sparkline(data: c.gpuHistory)
+                    .padding(.vertical, 2)
+                StatRow("GPU mem",
+                        c.gpuMemGB.map { String(format: "%.1f GB", $0) } ?? "—")
+                StatRow("RAM free",
+                        c.sysTotalGB > 0 ? String(format: "%.0f / %.0f GB",
+                                                   c.sysTotalGB - c.sysUsedGB, c.sysTotalGB) : "—",
+                        warn: c.sysTotalGB > 0 && c.sysUsedGB / c.sysTotalGB > 0.9)
             }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+
+            Divider()
+
+            // ── 3. Model picker ───────────────────────────────────────
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Picker("", selection: Binding(
+                        get: { c.selectedModel },
+                        set: { c.switchModel($0) }
+                    )) {
+                        ForEach(c.models, id: \.self) { m in
+                            let freeGB = c.sysTotalGB - c.sysUsedGB
+                            let sizeB  = c.modelSizes[m]
+                            let feas   = ramFeasibility(modelBytes: sizeB, freeGB: freeGB)
+                            let name   = m.replacingOccurrences(of: "mlx-community/", with: "")
+                            let size   = sizeB != nil ? humanSize(sizeB) : ""
+                            let dot    = feas.map { $0.label } ?? ""
+                            Text("\(dot) \(name)\(size.isEmpty ? "" : "  \(size)")").tag(m)
+                        }
+                    }.pickerStyle(.menu).labelsHidden()
+
+                    Spacer()
+
+                    // Controls
+                    if c.isRunning {
+                        Button { c.warmUp() } label: { Image(systemName: "flame") }
+                            .disabled((c.status != .up && c.status != .ready) || c.isWarming)
+                            .help("Warm up — pre-load model")
+                        Button { c.restart() } label: { Image(systemName: "arrow.clockwise") }
+                            .help("Restart")
+                        Button { c.stop() } label: { Image(systemName: "stop.fill") }
+                            .help("Stop server")
+                    } else {
+                        Button { c.start() } label: {
+                            Label("Start", systemImage: "play.fill")
+                        }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                    }
+
+                    if c.busy || c.isWarming {
+                        ProgressView().controlSize(.small)
+                    }
+
+                    Button { c.deleteModel(c.selectedModel) } label: { Image(systemName: "trash") }
+                        .foregroundStyle(.red.opacity(0.7))
+                        .disabled(c.models.count <= 1 || c.downloading != nil)
+                        .help("Delete model")
+                }
+
+                // Search
+                HStack(spacing: 6) {
+                    TextField("Search mlx-community…", text: $query)
+                        .textFieldStyle(.roundedBorder).font(.caption)
+                        .onSubmit { c.searchModels(query) }
+                    if c.searching {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button { c.searchModels(query) } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
+                        .disabled(query.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+
+                if !c.searchResults.isEmpty {
+                    ScrollView {
+                        VStack(spacing: 2) {
+                            ForEach(c.searchResults) { hit in
+                                HStack(alignment: .top, spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(hit.id.replacingOccurrences(of: "mlx-community/", with: ""))
+                                            .font(.caption).lineLimit(1)
+                                        HStack(spacing: 3) {
+                                            Text(humanSize(hit.sizeBytes))
+                                            if let f = ramFeasibility(
+                                                modelBytes: hit.sizeBytes,
+                                                freeGB: c.sysTotalGB - c.sysUsedGB) {
+                                                Text(f.label)
+                                                Text(f == .ok ? "fits"
+                                                     : f == .warn ? "tight" : "too large")
+                                                    .foregroundStyle(f.color)
+                                            }
+                                            Text("·  ↓\(hit.downloads)")
+                                        }
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { detail = hit }
+                                    Spacer()
+                                    if c.models.contains(hit.id) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(.green)
+                                    } else {
+                                        Button { c.downloadModel(hit.id) } label: {
+                                            Image(systemName: "arrow.down.circle")
+                                        }.buttonStyle(.borderless).disabled(c.downloading != nil)
+                                    }
+                                }
+                                .padding(.vertical, 3).padding(.horizontal, 6)
+                                if hit.id != c.searchResults.last?.id { Divider() }
+                            }
+                        }
+                    }
+                    .frame(height: 180)
+                    .background(Color.primary.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+
+                if let dl = c.downloading {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Downloading \(dl.replacingOccurrences(of: "mlx-community/", with: ""))…")
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+
+            Divider()
+
+            // ── 4. Settings + utilities ───────────────────────────────
+            VStack(alignment: .leading, spacing: 5) {
+                // Idle auto-stop
+                HStack(spacing: 6) {
+                    Toggle(isOn: $c.idleTTLEnabled) {
+                        Text("Auto-stop when idle").font(.caption)
+                    }.toggleStyle(.switch).controlSize(.mini)
+                    if c.idleTTLEnabled {
+                        Stepper(value: $c.idleTTLSeconds, in: 300...7200, step: 300) {
+                            Text("\(c.idleTTLSeconds / 60) min")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }.controlSize(.mini)
+                    }
+                }
+                if !c.idleLabel.isEmpty {
+                    Text(c.idleLabel).font(.caption2).foregroundStyle(.tertiary)
+                }
+
+                // Launch at login
+                Toggle(isOn: Binding(
+                    get: { c.loginEnabled }, set: { _ in c.toggleLogin() })) {
+                    Text("Launch at login").font(.caption)
+                }.toggleStyle(.switch).controlSize(.mini)
+
+                // Bottom row: utilities + quit
+                HStack(spacing: 12) {
+                    Button { c.copyEndpoint() } label: { Image(systemName: "doc.on.doc") }
+                        .help("Copy \(Config.baseURL)")
+                    Button { c.openLog() } label: { Image(systemName: "doc.text") }
+                        .help("Open log")
+                    Spacer()
+                    Button("Quit") { NSApplication.shared.terminate(nil) }
+                }.font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 12)
         }
-        .padding(14)
-        .frame(width: 290)
+        .frame(width: 300)
     }
 }
 
