@@ -116,6 +116,7 @@ jobs:
           SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
 
           # homebrew-tools 레포 클론 → cask 파일 수정 → PR
+          gh auth setup-git
           gh repo clone wonsss/homebrew-tools /tmp/tap
           cd /tmp/tap
           sed -i '' \
