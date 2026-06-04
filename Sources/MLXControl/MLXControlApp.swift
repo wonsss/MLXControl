@@ -998,7 +998,7 @@ struct MenuBarIcon: View {
         let content = VStack(spacing: -2) {
             badge.frame(height: 9)
             Text("MLX")
-                .font(.system(size: 15, weight: .heavy, design: .rounded))
+                .font(.system(size: 11, weight: .bold, design: .rounded))
                 .foregroundStyle(glyphColor)
         }
         .frame(width: 30, alignment: .center)
