@@ -67,10 +67,10 @@ open /Applications/MLXControl.app
 2. Open the DMG → drag `MLXControl.app` to `/Applications`
 3. Notarized — opens without Gatekeeper warnings.
 
-### Option C — Homebrew (coming soon)
+### Option C — Homebrew
 
 ```bash
-brew tap wonsss/mlxcontrol
+brew tap wonsss/tools
 brew install --cask mlxcontrol
 ```
 

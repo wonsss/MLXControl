@@ -67,10 +67,10 @@ open /Applications/MLXControl.app
 2. DMG 열기 → `MLXControl.app` 을 `/Applications` 폴더로 드래그
 3. 노타라이즈된 빌드라 Gatekeeper 경고 없이 바로 실행됨.
 
-### 방법 C — Homebrew (출시 예정)
+### 방법 C — Homebrew
 
 ```bash
-brew tap wonsss/mlxcontrol
+brew tap wonsss/tools
 brew install --cask mlxcontrol
 ```
 
