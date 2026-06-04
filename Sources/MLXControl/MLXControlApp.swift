@@ -205,6 +205,7 @@ final class ServerController {
     var searchResults: [ModelHit] = []
     var searching = false
     var toolsWarning: String? = nil    // shown when mlx-lm is not installed
+    var blinkOn = true
 
     @ObservationIgnored private var warmedUp = false
     @ObservationIgnored private var alertedRAM = false
@@ -221,10 +222,14 @@ final class ServerController {
         selectedModel = models.first ?? Config.fallbackModels[0]
         loginEnabled = SMAppService.mainApp.status == .enabled
         Task { @MainActor [weak self] in
+            var halfSeconds = 0
             while true {
                 guard let self else { break }
-                await self.tick()
-                try? await Task.sleep(for: .seconds(3))
+                halfSeconds += 1
+                // gather every 3s (6 half-second ticks); blink every 1s (2 ticks)
+                if halfSeconds % 6 == 0 { await self.tick() }
+                if halfSeconds % 2 == 0 { self.blinkOn.toggle() }
+                try? await Task.sleep(for: .milliseconds(500))
             }
         }
     }
@@ -964,13 +969,20 @@ struct ContentView: View {
 }
 
 // ─────────────────────────── Menu bar icon ───────────────────────────
-/// "MLX" text with a colored status dot above it.
+/// "MLX" text with a colored status dot above it — same style as HermesControl.
 ///
 /// MenuBarExtra re-tints its label as a monochrome template, stripping colors.
-/// We rasterize the composed view with ImageRenderer and display it as
-/// `.renderingMode(.original)` so the dot keeps its color.
+/// We rasterize with ImageRenderer + .renderingMode(.original) to preserve dot color.
+///
+/// Dot colors:
+///   gray   — stopped
+///   yellow — starting / up (model not loaded)
+///   green  — ready (warmed up)
+///   orange blink — warming up
 struct MenuBarIcon: View {
-    let isRunning: Bool
+    let status: ServerStatus
+    let isWarming: Bool
+    let blinkOn: Bool
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -982,14 +994,12 @@ struct MenuBarIcon: View {
     }
 
     @MainActor private func rendered() -> NSImage? {
-        let textColor: Color = colorScheme == .dark ? .white : .black
-        let content = VStack(spacing: 1) {
-            Circle()
-                .fill(isRunning ? Color.green : Color.gray)
-                .frame(width: 6, height: 6)
+        let glyphColor: Color = colorScheme == .dark ? .white : .black
+        let content = VStack(spacing: -2) {
+            badge.frame(height: 9)
             Text("MLX")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(textColor)
+                .font(.system(size: 15, weight: .heavy, design: .rounded))
+                .foregroundStyle(glyphColor)
         }
         .frame(width: 30, alignment: .center)
 
@@ -998,6 +1008,22 @@ struct MenuBarIcon: View {
         guard let image = renderer.nsImage else { return nil }
         image.isTemplate = false
         return image
+    }
+
+    @ViewBuilder private var badge: some View {
+        let color: Color = {
+            if isWarming { return blinkOn ? .orange : .clear }
+            switch status {
+            case .stopped:  return .gray
+            case .starting: return .yellow
+            case .up:       return .yellow
+            case .ready:    return .green
+            }
+        }()
+        Circle()
+            .fill(color)
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.8), lineWidth: 1))
+            .frame(width: 9, height: 9)
     }
 }
 
@@ -1009,7 +1035,7 @@ struct MLXControlApp: App {
         MenuBarExtra {
             ContentView(c: ctrl)
         } label: {
-            MenuBarIcon(isRunning: ctrl.isRunning)
+            MenuBarIcon(status: ctrl.status, isWarming: ctrl.isWarming, blinkOn: ctrl.blinkOn)
         }
         .menuBarExtraStyle(.window)
     }
