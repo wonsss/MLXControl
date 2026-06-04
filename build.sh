@@ -3,7 +3,7 @@ set -e
 cd "$(dirname "$0")"
 
 BUNDLE_ID="io.github.wonsss.mlxcontrol"
-VERSION="1.3"
+VERSION="0.1.2"
 APP="MLXControl.app"
 
 echo "→ 아이콘 생성…"
