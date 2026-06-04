@@ -922,16 +922,9 @@ struct ContentView: View {
                         let sizeB  = c.modelSizes[m]
                         let feas   = ramFeasibility(modelBytes: sizeB, freeGB: freeGB)
                         let name   = m.replacingOccurrences(of: "mlx-community/", with: "")
-                        let size   = humanSize(sizeB)
-                        if let f = feas {
-                            Label {
-                                Text("\(name)  \(size)").tag(m)
-                            } icon: {
-                                Text(f.label)
-                            }.tag(m)
-                        } else {
-                            Text(name).tag(m)
-                        }
+                        let size   = sizeB != nil ? humanSize(sizeB) : ""
+                        let dot    = feas.map { $0.label } ?? ""
+                        Text("\(dot) \(name)\(size.isEmpty ? "" : "  \(size)")").tag(m)
                     }
                 }.pickerStyle(.menu).labelsHidden()
                 Button { c.deleteModel(c.selectedModel) } label: { Image(systemName: "trash") }
