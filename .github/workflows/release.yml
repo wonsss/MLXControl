@@ -105,7 +105,7 @@ jobs:
             --notes "${NOTES:-See CHANGELOG.md}"
 
       # ── Homebrew Cask 자동 업데이트 ──
-      # homebrew-mlxcontrol 탭 레포가 있을 때 활성화. 없으면 이 스텝은 스킵됨.
+      # homebrew-tools 탭 레포가 있을 때 활성화. 없으면 이 스텝은 스킵됨.
       - name: Update Homebrew Cask
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}   # repo 쓰기 권한 PAT
@@ -115,8 +115,8 @@ jobs:
           DMG="MLXControl-${VERSION}.dmg"
           SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
 
-          # homebrew-mlxcontrol 레포 클론 → cask 파일 수정 → PR
-          gh repo clone wonsss/homebrew-mlxcontrol /tmp/tap
+          # homebrew-tools 레포 클론 → cask 파일 수정 → PR
+          gh repo clone wonsss/homebrew-tools /tmp/tap
           cd /tmp/tap
           sed -i '' \
             -e "s|version \".*\"|version \"${VERSION}\"|" \
@@ -130,7 +130,7 @@ jobs:
           git commit -m "chore: bump mlxcontrol to v${VERSION}"
           git push origin "$BRANCH"
           gh pr create \
-            --repo wonsss/homebrew-mlxcontrol \
+            --repo wonsss/homebrew-tools \
             --title "chore: bump mlxcontrol to v${VERSION}" \
             --body "Auto-updated by release workflow. SHA256: \`${SHA}\`" \
             --base main --head "$BRANCH"

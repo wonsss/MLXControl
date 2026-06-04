@@ -3,12 +3,12 @@
 # homebrew/homebrew-cask 에 PR 생성.
 #
 # 자체 탭으로 먼저 배포하려면:
-#   gh repo create wonsss/homebrew-mlxcontrol --public
-#   이 파일을 Formula/mlxcontrol.rb 로 복사 후 push
-#   사용자: brew tap wonsss/mlxcontrol && brew install --cask mlxcontrol
+#   gh repo create wonsss/homebrew-tools --public
+#   이 파일을 Casks/mlxcontrol.rb 로 복사 후 push
+#   사용자: brew tap wonsss/tools && brew install --cask mlxcontrol
 cask "mlxcontrol" do
-  version "1.3.0"
-  sha256 "REPLACE_WITH_SHA256_OF_DMG"   # shasum -a 256 MLXControl-1.3.0.dmg
+  version "0.1.1"
+  sha256 "95f2c19f9cb15bd4bef705c5e978684aadc477628cd65bfac967205521142023"
 
   url "https://github.com/wonsss/MLXControl/releases/download/v#{version}/MLXControl-#{version}.dmg"
   name "MLX Control"
