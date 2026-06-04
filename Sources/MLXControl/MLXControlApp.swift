@@ -25,6 +25,13 @@ enum Config {
     static let alertCooldown = 120.0
     static let historyLen = 40
 
+    // Per-model TTL: auto-stop after this many seconds of idle (no inference activity).
+    static let idleTTLDefault = 1800  // 30 min
+
+    // Memory guard: refuse to start if model needs more RAM than this fraction of free RAM.
+    static let memGuardHardFraction = 0.95  // block if model > 95 % of free
+    static let memGuardSoftFraction = 0.80  // warn if model > 80 % of free
+
     private static func findBin(_ name: String) -> String? {
         // Check common install locations first, then walk PATH
         let candidates = [
@@ -229,12 +236,16 @@ final class ServerController {
     var toolsWarning: String? = nil    // shown when mlx-lm is not installed
     var blinkOn = true
     var modelSizes: [String: Int] = [:]  // repo id → bytes on disk
+    var idleTTLEnabled = true
+    var idleTTLSeconds = Config.idleTTLDefault
+    var idleSeconds: Int = 0   // seconds since last inference activity (for UI)
 
     @ObservationIgnored private var warmedUp = false
     @ObservationIgnored private var alertedRAM = false
     @ObservationIgnored private var alertedFree = false
     @ObservationIgnored private var lastRAMAlert = Date.distantPast
     @ObservationIgnored private var lastFreeAlert = Date.distantPast
+    @ObservationIgnored private var lastActivity = Date.distantPast
 
     var isRunning: Bool { status != .stopped }
 
@@ -345,11 +356,14 @@ final class ServerController {
         pid = s.pid
         if s.pid != nil {
             model = s.model; ramGB = s.ramGB; cpu = s.cpu; uptime = s.uptime
-            if let t = s.tps { tps = t }
+            if let t = s.tps { tps = t; lastActivity = Date() }
             status = s.httpUp ? (warmedUp ? .ready : .up) : .starting
+            // If activity has never been recorded, treat server start as first activity.
+            if lastActivity == Date.distantPast { lastActivity = Date() }
+            checkIdleTTL()
         } else {
             status = .stopped; model = ""; ramGB = 0; cpu = 0; uptime = ""
-            warmedUp = false; tps = nil
+            warmedUp = false; tps = nil; lastActivity = Date.distantPast
         }
         gpuUtil = s.gpuUtil
         gpuMemGB = s.gpuMemGB
@@ -357,6 +371,30 @@ final class ServerController {
         if gpuHistory.count > Config.historyLen { gpuHistory.removeFirst() }
         sysUsedGB = s.sysUsedGB
         checkAlerts()
+    }
+
+    private func checkIdleTTL() {
+        guard isRunning else { idleSeconds = 0; return }
+        guard lastActivity != Date.distantPast else { return }
+        let idle = Date().timeIntervalSince(lastActivity)
+        idleSeconds = Int(idle)
+        guard idleTTLEnabled, !busy, !isWarming else { return }
+        guard idle >= Double(idleTTLSeconds) else { return }
+        notify("⚡ MLX Control", "Idle auto-stop",
+               "No activity for \(idleTTLSeconds / 60) min — stopping server to free RAM")
+        stop()
+    }
+
+    var idleLabel: String {
+        guard isRunning, idleTTLEnabled, lastActivity != Date.distantPast else { return "" }
+        let idle = idleSeconds
+        let remaining = idleTTLSeconds - idle
+        if remaining <= 0 { return "" }
+        let idleMin = idle / 60
+        let remMin  = remaining / 60
+        return idleMin < 1
+            ? "active · auto-stop in \(remMin)m"
+            : "idle \(idleMin)m · auto-stop in \(remMin)m"
     }
 
     /// All subprocess calls — must run off the main thread (avoid UI hitches).
@@ -493,7 +531,24 @@ final class ServerController {
                    "Another app (e.g. oMLX) is already on this port. Stop it first.")
             return
         }
-        busy = true; warmedUp = false
+        // Memory guard: compare model disk size against available system RAM.
+        let freeGB = sysTotalGB - sysUsedGB
+        if let modelBytes = modelSizes[selectedModel] {
+            let modelGB = Double(modelBytes) / 1_073_741_824
+            if modelGB > freeGB * Config.memGuardHardFraction {
+                notify("⚡ MLX Control", "Insufficient RAM",
+                       String(format: "%.1f GB model needs ~%.1f GB free (have %.1f GB)",
+                              modelGB, modelGB / 0.95, freeGB))
+                return  // Block start
+            }
+            if modelGB > freeGB * Config.memGuardSoftFraction {
+                notify("⚡ MLX Control", "Low RAM warning",
+                       String(format: "%.1f GB model may cause swapping (%.1f GB free)",
+                              modelGB, freeGB))
+                // Allow start but warn
+            }
+        }
+        busy = true; warmedUp = false; lastActivity = Date()
         launchServer()
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2)); self.busy = false; self.refresh()
@@ -879,7 +934,7 @@ struct ContentView: View {
 
             HStack(spacing: 8) {
                 Circle().fill(c.statusColor).frame(width: 9, height: 9)
-                Text("MLX Server").font(.headline)
+                Text("MLX Control").font(.headline)
                 Spacer()
                 Text(c.statusText).font(.caption).foregroundStyle(.secondary)
             }
@@ -1013,10 +1068,30 @@ struct ContentView: View {
 
             Divider()
 
-            HStack {
-                Button { c.copyEndpoint() } label: { Label("Copy endpoint", systemImage: "doc.on.doc") }
+            // idle countdown (shown only when server is running + TTL enabled)
+            if !c.idleLabel.isEmpty {
+                Text(c.idleLabel)
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack(spacing: 10) {
+                // Auto-stop toggle + stepper
+                Toggle(isOn: $c.idleTTLEnabled) {
+                    Text("Auto-stop when idle").font(.caption)
+                }.toggleStyle(.switch).controlSize(.mini)
+                if c.idleTTLEnabled {
+                    Stepper(value: $c.idleTTLSeconds, in: 300...7200, step: 300) {
+                        Text("\(c.idleTTLSeconds / 60) min")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }.controlSize(.mini)
+                }
                 Spacer()
+                // Utilities (small icons)
+                Button { c.copyEndpoint() } label: { Image(systemName: "doc.on.doc") }
+                    .help("Copy endpoint (\(Config.baseURL))")
                 Button { c.openLog() } label: { Image(systemName: "doc.text") }
+                    .help("Open log")
             }.font(.caption)
 
             Toggle(isOn: Binding(get: { c.loginEnabled }, set: { _ in c.toggleLogin() })) {
