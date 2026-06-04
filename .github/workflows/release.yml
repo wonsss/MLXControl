@@ -1,0 +1,107 @@
+name: release
+
+# 태그(v*) 푸시 시 자동 실행: 빌드 → Developer ID 서명 → 노타라이즈 → DMG → GitHub Release
+on:
+  push:
+    tags: [ 'v*' ]
+
+jobs:
+  release:
+    runs-on: macos-15      # Apple Silicon 러너 (Xcode + codesign)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version && xcodebuild -version
+
+      # ── 인증서 임포트 ──
+      - name: Import Developer ID certificate
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          echo "$P12_BASE64" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p ci-keychain ci.keychain
+          security default-keychain -s ci.keychain
+          security unlock-keychain -p ci-keychain ci.keychain
+          security import /tmp/cert.p12 -k ci.keychain -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productbuild
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci-keychain ci.keychain
+          rm -f /tmp/cert.p12
+
+      # ── App Store Connect API 키 (노타라이즈용) ──
+      - name: Setup notarytool credentials
+        env:
+          AC_API_KEY_BASE64: ${{ secrets.AC_API_KEY_BASE64 }}
+          AC_KEY_ID: ${{ secrets.AC_KEY_ID }}
+          AC_ISSUER_ID: ${{ secrets.AC_ISSUER_ID }}
+        run: |
+          mkdir -p ~/private_keys
+          echo "$AC_API_KEY_BASE64" | base64 --decode > ~/private_keys/AuthKey_${AC_KEY_ID}.p8
+          # notarytool은 --apple-id 대신 API key 사용 (만료 걱정 없음)
+          xcrun notarytool store-credentials "mlxcontrol-notarize" \
+            --key ~/private_keys/AuthKey_${AC_KEY_ID}.p8 \
+            --key-id "$AC_KEY_ID" \
+            --issuer "$AC_ISSUER_ID"
+
+      # ── 빌드 + 서명 ──
+      - name: Build and sign
+        run: ./build.sh --no-install
+
+      # ── 노타라이즈 + staple ──
+      - name: Notarize
+        run: |
+          ditto -c -k --keepParent MLXControl.app MLXControl.zip
+          xcrun notarytool submit MLXControl.zip \
+            --keychain-profile "mlxcontrol-notarize" --wait
+          xcrun stapler staple MLXControl.app
+          rm MLXControl.zip
+
+      # ── create-dmg ──
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Create DMG
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          create-dmg \
+            --volname "MLXControl" \
+            --volicon "MLXControl.icns" \
+            --window-pos 200 120 --window-size 600 380 \
+            --icon-size 100 \
+            --icon "MLXControl.app" 160 185 \
+            --hide-extension "MLXControl.app" \
+            --app-drop-link 430 185 \
+            --no-internet-enable \
+            "MLXControl-${VERSION}.dmg" \
+            "MLXControl.app"
+          DEV_ID_HASH=$(security find-identity -v -p codesigning \
+            | grep "Developer ID Application" | head -1 | awk '{print $2}')
+          codesign --force --sign "$DEV_ID_HASH" "MLXControl-${VERSION}.dmg"
+          xcrun notarytool submit "MLXControl-${VERSION}.dmg" \
+            --keychain-profile "mlxcontrol-notarize" --wait
+          xcrun stapler staple "MLXControl-${VERSION}.dmg"
+          echo "DMG_PATH=MLXControl-${VERSION}.dmg" >> "$GITHUB_ENV"
+
+      # ── 테스트 ──
+      - name: Test
+        run: swift test
+
+      # ── GitHub Release 생성 ──
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          NOTES=$(awk "/## \[${VERSION#v}\]/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)
+          gh release create "$VERSION" \
+            "$DMG_PATH" \
+            --title "MLX Control ${VERSION}" \
+            --notes "${NOTES:-See CHANGELOG.md}"
+
+      # ── 키체인 정리 ──
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          security delete-keychain ci.keychain 2>/dev/null || true
+          rm -f ~/private_keys/AuthKey_*.p8

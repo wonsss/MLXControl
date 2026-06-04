@@ -2,15 +2,15 @@
 # 노타라이즈 스크립트 — Developer ID Application 인증서 + Apple Developer 계정 필요
 #
 # 최초 1회: 자격증명을 로컬 키체인에 저장
-#   ./notarize.sh --store-credentials
+#   ./scripts/notarize.sh --store-credentials
 #
 # 이후 배포 시:
-#   ./notarize.sh
+#   ./scripts/notarize.sh
 set -e
 
 KEYCHAIN_PROFILE="mlxcontrol-notarize"
 APP="MLXControl.app"
-# Team ID는 Developer ID 인증서에서 자동 감지. 필요시 override: TEAM_ID=XXXXXXXXXX ./notarize.sh
+# Team ID는 Developer ID 인증서에서 자동 감지. 필요시 override: TEAM_ID=XXXXXXXXXX ./scripts/notarize.sh
 TEAM_ID="${TEAM_ID:-$(security find-identity -v -p codesigning 2>/dev/null \
   | grep 'Developer ID Application' | head -1 | grep -oE '\([A-Z0-9]{10}\)' | tr -d '()')}"
 
@@ -26,7 +26,7 @@ store_credentials() {
     echo "  (형식: xxxx-xxxx-xxxx-xxxx)"
     echo
     if [[ -z "$TEAM_ID" ]]; then
-        echo "✗ Team ID 자동 감지 실패 — TEAM_ID=XXXXXXXXXX ./notarize.sh --store-credentials 로 지정"
+        echo "✗ Team ID 자동 감지 실패 — TEAM_ID=XXXXXXXXXX ./scripts/notarize.sh --store-credentials 로 지정"
         exit 1
     fi
     echo "  Team ID: $TEAM_ID (자동 감지)"
@@ -35,7 +35,7 @@ store_credentials() {
         --team-id "$TEAM_ID"
     echo
     echo "✓ 키체인 프로파일 '$KEYCHAIN_PROFILE' 저장 완료"
-    echo "  이후 ./notarize.sh 만 실행하면 됩니다."
+    echo "  이후 ./scripts/notarize.sh 만 실행하면 됩니다."
 }
 
 notarize() {

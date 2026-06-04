@@ -63,9 +63,16 @@ open /Applications/MLXControl.app
 
 ### Option B — Download pre-built (GitHub Releases)
 
-1. Download `MLXControl-notarized.zip` from [Releases](https://github.com/wonsss/MLXControl/releases)
-2. Unzip and move `MLXControl.app` to `/Applications`
-3. A notarized build opens normally. (For an unsigned build, right-click → Open, or run `xattr -dr com.apple.quarantine /Applications/MLXControl.app`.)
+1. Download `MLXControl-x.x.x.dmg` from [Releases](https://github.com/wonsss/MLXControl/releases)
+2. Open the DMG → drag `MLXControl.app` to `/Applications`
+3. Notarized — opens without Gatekeeper warnings.
+
+### Option C — Homebrew (coming soon)
+
+```bash
+brew tap wonsss/mlxcontrol
+brew install --cask mlxcontrol
+```
 
 ## Usage
 

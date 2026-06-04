@@ -63,9 +63,16 @@ open /Applications/MLXControl.app
 
 ### 방법 B — 빌드본 다운로드 (GitHub Releases)
 
-1. [Releases](https://github.com/wonsss/MLXControl/releases) 에서 `MLXControl-notarized.zip` 다운로드
-2. 압축 해제 후 `MLXControl.app` 을 `/Applications` 로 이동
-3. 노타라이즈된 빌드는 바로 열림. (서명 안 된 빌드는 우클릭 → 열기, 또는 `xattr -dr com.apple.quarantine /Applications/MLXControl.app`)
+1. [Releases](https://github.com/wonsss/MLXControl/releases) 에서 `MLXControl-x.x.x.dmg` 다운로드
+2. DMG 열기 → `MLXControl.app` 을 `/Applications` 폴더로 드래그
+3. 노타라이즈된 빌드라 Gatekeeper 경고 없이 바로 실행됨.
+
+### 방법 C — Homebrew (출시 예정)
+
+```bash
+brew tap wonsss/mlxcontrol
+brew install --cask mlxcontrol
+```
 
 ## 사용법
 

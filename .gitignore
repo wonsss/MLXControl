@@ -3,4 +3,5 @@
 *.icns
 *.iconset/
 *.zip
+*.dmg
 .DS_Store
