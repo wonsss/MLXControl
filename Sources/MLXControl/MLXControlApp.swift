@@ -57,6 +57,28 @@ func humanSize(_ bytes: Int?) -> String {
     return gb >= 1 ? String(format: "%.1f GB", gb) : String(format: "%.0f MB", Double(b) / 1_048_576)
 }
 
+enum RAMFeasibility {
+    case ok, warn, insufficient
+    var label: String {
+        switch self { case .ok: return "✅"; case .warn: return "⚠️"; case .insufficient: return "❌" }
+    }
+    var color: Color {
+        switch self { case .ok: return .green; case .warn: return .orange; case .insufficient: return .red }
+    }
+}
+
+/// Compare model size against free RAM.
+/// - ok: modelGB < freeGB * 0.8
+/// - warn: modelGB < freeGB (tight but may work)
+/// - insufficient: modelGB >= freeGB
+func ramFeasibility(modelBytes: Int?, freeGB: Double) -> RAMFeasibility? {
+    guard let b = modelBytes, freeGB > 0 else { return nil }
+    let modelGB = Double(b) / 1_073_741_824
+    if modelGB < freeGB * 0.8 { return .ok }
+    if modelGB < freeGB       { return .warn }
+    return .insufficient
+}
+
 // ─────────────────────────── Shell helper ───────────────────────────
 // Always run via Process argument arrays — no shell interpolation.
 @discardableResult
@@ -206,6 +228,7 @@ final class ServerController {
     var searching = false
     var toolsWarning: String? = nil    // shown when mlx-lm is not installed
     var blinkOn = true
+    var modelSizes: [String: Int] = [:]  // repo id → bytes on disk
 
     @ObservationIgnored private var warmedUp = false
     @ObservationIgnored private var alertedRAM = false
@@ -220,6 +243,7 @@ final class ServerController {
         checkTools()
         models = detectModels()
         selectedModel = models.first ?? Config.fallbackModels[0]
+        refreshModelSizes()
         loginEnabled = SMAppService.mainApp.status == .enabled
         Task { @MainActor [weak self] in
             var halfSeconds = 0
@@ -265,6 +289,22 @@ final class ServerController {
         case .starting: return .orange
         case .up: return .yellow
         case .ready: return .green
+        }
+    }
+
+    func refreshModelSizes() {
+        let ids = models
+        let hub = Config.hubPath
+        Task.detached(priority: .utility) {
+            var sizes: [String: Int] = [:]
+            for id in ids {
+                let dir = hub + "/models--" + id.replacingOccurrences(of: "/", with: "--")
+                let out = sh("/usr/bin/du", ["-sk", dir])
+                let kb = Int(out.split(whereSeparator: { $0 == " " || $0 == "\t" })
+                    .first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? "0") ?? 0
+                sizes[id] = kb * 1024
+            }
+            await MainActor.run { self.modelSizes = sizes }
         }
     }
 
@@ -531,6 +571,7 @@ final class ServerController {
             let ok = await Self.runDownload(r)
             self.downloading = nil
             self.models = self.detectModels()
+            self.refreshModelSizes()
             notify("⚡ MLX Control", ok ? "Download complete" : "Download failed", r)
         }
     }
@@ -786,6 +827,16 @@ struct ContentView: View {
             HStack(spacing: 10) {
                 Label("\(hit.downloads)", systemImage: "arrow.down").font(.caption)
                 Label(humanSize(hit.sizeBytes), systemImage: "internaldrive").font(.caption)
+                if let f = ramFeasibility(modelBytes: hit.sizeBytes,
+                                          freeGB: c.sysTotalGB - c.sysUsedGB) {
+                    HStack(spacing: 3) {
+                        Text(f.label)
+                        Text(f == .ok ? "fits in RAM"
+                             : f == .warn ? "tight — may swap"
+                             : "insufficient RAM")
+                            .foregroundStyle(f.color)
+                    }.font(.caption)
+                }
             }.foregroundStyle(.secondary)
             if let m = hit.descr { Text(m).font(.caption).foregroundStyle(.tertiary) }
             Divider()
@@ -867,7 +918,20 @@ struct ContentView: View {
                     set: { c.switchModel($0) }
                 )) {
                     ForEach(c.models, id: \.self) { m in
-                        Text(m.replacingOccurrences(of: "mlx-community/", with: "")).tag(m)
+                        let freeGB = c.sysTotalGB - c.sysUsedGB
+                        let sizeB  = c.modelSizes[m]
+                        let feas   = ramFeasibility(modelBytes: sizeB, freeGB: freeGB)
+                        let name   = m.replacingOccurrences(of: "mlx-community/", with: "")
+                        let size   = humanSize(sizeB)
+                        if let f = feas {
+                            Label {
+                                Text("\(name)  \(size)").tag(m)
+                            } icon: {
+                                Text(f.label)
+                            }.tag(m)
+                        } else {
+                            Text(name).tag(m)
+                        }
                     }
                 }.pickerStyle(.menu).labelsHidden()
                 Button { c.deleteModel(c.selectedModel) } label: { Image(systemName: "trash") }
@@ -896,8 +960,16 @@ struct ContentView: View {
                                 VStack(alignment: .leading, spacing: 0) {
                                     Text(hit.id.replacingOccurrences(of: "mlx-community/", with: ""))
                                         .font(.caption).lineLimit(1)
-                                    Text("↓ \(hit.downloads)  ·  \(humanSize(hit.sizeBytes))")
-                                        .font(.caption2).foregroundStyle(.secondary)
+                                    HStack(spacing: 4) {
+                                        Text("↓ \(hit.downloads)  ·  \(humanSize(hit.sizeBytes))")
+                                        if let f = ramFeasibility(
+                                            modelBytes: hit.sizeBytes,
+                                            freeGB: c.sysTotalGB - c.sysUsedGB) {
+                                            Text(f.label)
+                                            Text(f == .ok ? "fits" : f == .warn ? "tight" : "too large")
+                                                .foregroundStyle(f.color)
+                                        }
+                                    }.font(.caption2).foregroundStyle(.secondary)
                                     if let d = hit.descr {
                                         Text(d).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                                     }
