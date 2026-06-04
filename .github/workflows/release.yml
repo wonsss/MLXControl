@@ -104,6 +104,37 @@ jobs:
             --title "MLX Control ${VERSION}" \
             --notes "${NOTES:-See CHANGELOG.md}"
 
+      # ── Homebrew Cask 자동 업데이트 ──
+      # homebrew-mlxcontrol 탭 레포가 있을 때 활성화. 없으면 이 스텝은 스킵됨.
+      - name: Update Homebrew Cask
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}   # repo 쓰기 권한 PAT
+        if: env.GH_TOKEN != ''
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          DMG="MLXControl-${VERSION}.dmg"
+          SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
+
+          # homebrew-mlxcontrol 레포 클론 → cask 파일 수정 → PR
+          gh repo clone wonsss/homebrew-mlxcontrol /tmp/tap
+          cd /tmp/tap
+          sed -i '' \
+            -e "s|version \".*\"|version \"${VERSION}\"|" \
+            -e "s|sha256 \".*\"|sha256 \"${SHA}\"|" \
+            Casks/mlxcontrol.rb
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="bump-v${VERSION}"
+          git checkout -b "$BRANCH"
+          git add Casks/mlxcontrol.rb
+          git commit -m "chore: bump mlxcontrol to v${VERSION}"
+          git push origin "$BRANCH"
+          gh pr create \
+            --repo wonsss/homebrew-mlxcontrol \
+            --title "chore: bump mlxcontrol to v${VERSION}" \
+            --body "Auto-updated by release workflow. SHA256: \`${SHA}\`" \
+            --base main --head "$BRANCH"
+
       # ── 키체인 정리 ──
       - name: Cleanup keychain
         if: always()

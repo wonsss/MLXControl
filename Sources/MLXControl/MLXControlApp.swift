@@ -46,7 +46,7 @@ enum Config {
             "/opt/homebrew/bin/" + name,
             "/usr/local/bin/" + name,
         ]
-        for c in candidates { if FileManager.default.isExecutableFile(atPath: c) { return c } }
+        for c in candidates where FileManager.default.isExecutableFile(atPath: c) { return c }
         let paths = ProcessInfo.processInfo.environment["PATH"]?
             .split(separator: ":").map(String.init) ?? []
         return paths.map { $0 + "/" + name }
@@ -88,7 +88,7 @@ func ramFeasibility(modelBytes: Int?, freeGB: Double) -> RAMFeasibility? {
     guard let b = modelBytes, freeGB > 0 else { return nil }
     let modelGB = Double(b) / 1_073_741_824
     if modelGB < freeGB * 0.8 { return .ok }
-    if modelGB < freeGB       { return .warn }
+    if modelGB < freeGB { return .warn }
     return .insufficient
 }
 
@@ -180,7 +180,6 @@ enum MoveToApplications {
             try fm.copyItem(atPath: src, toPath: dest)
         } catch {
             // On copy failure, retry via Process (no AppleScript string injection)
-            
             let rm = Process(); rm.executableURL = URL(fileURLWithPath: "/bin/rm")
             rm.arguments = ["-rf", dest]
             try? rm.run(); rm.waitUntilExit()
@@ -671,7 +670,8 @@ final class ServerController {
 
         let alert = NSAlert()
         alert.messageText = "Delete model"
-        alert.informativeText = "\(repo)\n\nReclaims about \(folderSize(dir))\nPermanently removes it from the disk cache."
+        let sizeStr = folderSize(dir)
+        alert.informativeText = "\(repo)\n\nReclaims about \(sizeStr)\nPermanently removes it from the disk cache."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
@@ -781,7 +781,7 @@ final class ServerController {
     }
 
     private static func runSearch(_ q: String) async -> [ModelHit] {
-        var comps = URLComponents(string: "https://huggingface.co/api/models")!
+        guard var comps = URLComponents(string: "https://huggingface.co/api/models") else { return [] }
         comps.queryItems = [
             .init(name: "author", value: "mlx-community"),
             .init(name: "search", value: q),
@@ -864,7 +864,8 @@ struct Sparkline: View {
                 Path { p in
                     p.move(to: CGPoint(x: 0, y: h))
                     pts.forEach { p.addLine(to: $0) }
-                    p.addLine(to: CGPoint(x: pts.last!.x, y: h)); p.closeSubpath()
+                    if let last = pts.last { p.addLine(to: CGPoint(x: last.x, y: h)) }
+                    p.closeSubpath()
                 }.fill(.green.opacity(0.15))
                 Path { p in
                     p.move(to: pts[0]); pts.dropFirst().forEach { p.addLine(to: $0) }
