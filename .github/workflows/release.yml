@@ -5,6 +5,9 @@ on:
   push:
     tags: [ 'v*' ]
 
+permissions:
+  contents: write   # gh release create 에 필요
+
 jobs:
   release:
     runs-on: macos-15      # Apple Silicon 러너 (Xcode + codesign)
