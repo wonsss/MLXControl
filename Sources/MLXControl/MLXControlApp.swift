@@ -938,6 +938,44 @@ struct ContentView: View {
     }
 }
 
+// ─────────────────────────── Menu bar icon ───────────────────────────
+/// "MLX" text with a colored status dot above it.
+///
+/// MenuBarExtra re-tints its label as a monochrome template, stripping colors.
+/// We rasterize the composed view with ImageRenderer and display it as
+/// `.renderingMode(.original)` so the dot keeps its color.
+struct MenuBarIcon: View {
+    let isRunning: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if let image = rendered() {
+            Image(nsImage: image).renderingMode(.original)
+        } else {
+            Text("MLX").font(.system(size: 11, weight: .bold))
+        }
+    }
+
+    @MainActor private func rendered() -> NSImage? {
+        let textColor: Color = colorScheme == .dark ? .white : .black
+        let content = VStack(spacing: 1) {
+            Circle()
+                .fill(isRunning ? Color.green : Color.gray)
+                .frame(width: 6, height: 6)
+            Text("MLX")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(textColor)
+        }
+        .frame(width: 30, alignment: .center)
+
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard let image = renderer.nsImage else { return nil }
+        image.isTemplate = false
+        return image
+    }
+}
+
 @main
 struct MLXControlApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
@@ -946,10 +984,7 @@ struct MLXControlApp: App {
         MenuBarExtra {
             ContentView(c: ctrl)
         } label: {
-            HStack(spacing: 3) {
-                Image(systemName: ctrl.isRunning ? "bolt.fill" : "bolt.slash")
-                Text(ctrl.barTitle)
-            }
+            MenuBarIcon(isRunning: ctrl.isRunning)
         }
         .menuBarExtraStyle(.window)
     }
