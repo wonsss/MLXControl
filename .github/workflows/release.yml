@@ -24,7 +24,9 @@ jobs:
           security create-keychain -p ci-keychain ci.keychain
           security default-keychain -s ci.keychain
           security unlock-keychain -p ci-keychain ci.keychain
-          security import /tmp/cert.p12 -k ci.keychain -P "$P12_PASSWORD" \
+          # -P "" 로 빈 암호 명시 (변수 확장 문제 방지)
+          P12_PASS="${P12_PASSWORD:-}"
+          security import /tmp/cert.p12 -k ci.keychain -P "${P12_PASS}" \
             -T /usr/bin/codesign -T /usr/bin/productbuild
           security set-key-partition-list -S apple-tool:,apple: -s -k ci-keychain ci.keychain
           rm -f /tmp/cert.p12
