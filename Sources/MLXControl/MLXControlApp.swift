@@ -4,7 +4,13 @@ import ServiceManagement
 // ─────────────────────────── Config ───────────────────────────
 enum Config {
     static let host = "127.0.0.1"
-    static let port = 8080
+    static var port: Int {
+        get {
+            let v = UserDefaults.standard.integer(forKey: "serverPort")
+            return v > 0 ? v : 8080
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "serverPort") }
+    }
     static var baseURL: String { "http://\(host):\(port)/v1" }
 
     static let hubPath = ("~/.cache/huggingface/hub" as NSString).expandingTildeInPath
@@ -239,6 +245,7 @@ final class ServerController {
     var idleTTLEnabled = true
     var idleTTLSeconds = Config.idleTTLDefault
     var idleSeconds: Int = 0   // seconds since last inference activity (for UI)
+    var serverPort: Int = Config.port  // editable port (persisted in UserDefaults)
 
     @ObservationIgnored private var warmedUp = false
     @ObservationIgnored private var alertedRAM = false
@@ -794,9 +801,19 @@ final class ServerController {
     }
 
     // ── Misc ──
+    var endpointURL: String { "http://\(Config.host):\(serverPort)/v1" }
+
     func copyEndpoint() {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(Config.baseURL, forType: .string)
+        NSPasteboard.general.setString(endpointURL, forType: .string)
+    }
+
+    func applyPort(_ port: Int) {
+        let p = max(1024, min(65535, port))
+        serverPort = p
+        Config.port = p
+        // Restart if running so the new port takes effect
+        if isRunning { restart() }
     }
 
     func openLog() { sh("/usr/bin/open", ["-a", "Console", Config.logPath]) }
@@ -864,6 +881,8 @@ struct ContentView: View {
     @Bindable var c: ServerController
     @State private var query = ""
     @State private var detail: ModelHit?
+    @State private var editingPort = false
+    @State private var portInput = ""
 
     var body: some View {
         if let d = detail { detailView(d) } else { mainView }
@@ -1136,12 +1155,50 @@ struct ContentView: View {
                     Text("Launch at login").font(.caption)
                 }.toggleStyle(.switch).controlSize(.mini)
 
-                // Bottom row: utilities + quit
+                // Endpoint row
+                HStack(spacing: 6) {
+                    if editingPort {
+                        Text("http://127.0.0.1:")
+                            .font(.caption2).foregroundStyle(.secondary).fixedSize()
+                        TextField("8080", text: $portInput)
+                            .textFieldStyle(.roundedBorder).font(.caption2)
+                            .frame(width: 52)
+                            .onSubmit {
+                                if let p = Int(portInput) { c.applyPort(p) }
+                                editingPort = false
+                            }
+                        Text("/v1").font(.caption2).foregroundStyle(.secondary)
+                        Button("Done") {
+                            if let p = Int(portInput) { c.applyPort(p) }
+                            editingPort = false
+                        }.font(.caption2)
+                    } else {
+                        Text(c.endpointURL)
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Spacer()
+                        Button {
+                            c.copyEndpoint()
+                        } label: { Image(systemName: "doc.on.doc") }
+                            .help("Copy endpoint")
+                        Button {
+                            portInput = "\(c.serverPort)"
+                            editingPort = true
+                        } label: { Image(systemName: "pencil") }
+                            .help("Edit port")
+                            .disabled(c.isRunning)  // warn if running
+                        if c.isRunning {
+                            Text("stop first").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                }.font(.caption)
+
+                // Bottom row: log + quit
                 HStack(spacing: 12) {
-                    Button { c.copyEndpoint() } label: { Image(systemName: "doc.on.doc") }
-                        .help("Copy \(Config.baseURL)")
-                    Button { c.openLog() } label: { Image(systemName: "doc.text") }
-                        .help("Open log")
+                    Button { c.openLog() } label: {
+                        Label("Log", systemImage: "doc.text")
+                    }
+                    .help("Open server log")
                     Spacer()
                     Button("Quit") { NSApplication.shared.terminate(nil) }
                 }.font(.caption).foregroundStyle(.secondary)
