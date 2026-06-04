@@ -1,5 +1,7 @@
 # MLX Control
 
+**English** | [한국어](README.ko.md)
+
 A native macOS menu bar app to manage your local [mlx-lm](https://github.com/ml-explore/mlx-lm) inference server — start, stop, monitor resources, and download models, all without touching the terminal.
 
 [![build](https://github.com/wonsss/MLXControl/actions/workflows/build.yml/badge.svg)](https://github.com/wonsss/MLXControl/actions/workflows/build.yml)
@@ -10,6 +12,17 @@ A native macOS menu bar app to manage your local [mlx-lm](https://github.com/ml-
 
 <!-- Add a screenshot of the menu bar popover here: -->
 <!-- ![MLX Control](docs/screenshot.png) -->
+
+## Table of Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Logs](#logs)
+- [Notarization](#notarization)
+- [Security](#security)
+- [License](#license)
 
 ## Features
 
@@ -50,10 +63,9 @@ open /Applications/MLXControl.app
 
 ### Option B — Download pre-built (GitHub Releases)
 
-1. Download `MLXControl.zip` from [Releases](https://github.com/wonsss/MLXControl/releases)
+1. Download `MLXControl-notarized.zip` from [Releases](https://github.com/wonsss/MLXControl/releases)
 2. Unzip and move `MLXControl.app` to `/Applications`
-3. **First launch**: right-click → Open (bypasses Gatekeeper unsigned-app warning)
-   - Or run once: `xattr -dr com.apple.quarantine /Applications/MLXControl.app`
+3. A notarized build opens normally. (For an unsigned build, right-click → Open, or run `xattr -dr com.apple.quarantine /Applications/MLXControl.app`.)
 
 ## Usage
 
@@ -69,13 +81,13 @@ open /Applications/MLXControl.app
 
 ## Logs
 
-Server logs are written to `~/Library/Logs/MLXControl/mlx_server.log`.  
+Server logs are written to `~/Library/Logs/MLXControl/mlx_server.log`.
 Click **📄** in the app to open them in Console.app.
 
-## Notarization (for distributers)
+## Notarization
 
-If you have an Apple Developer Program membership and a "Developer ID Application"
-certificate, you can distribute a notarized build:
+For distributors with an Apple Developer Program membership and a "Developer ID
+Application" certificate:
 
 ```bash
 # one-time: store Apple ID + app-specific password in the local Keychain
@@ -85,18 +97,18 @@ certificate, you can distribute a notarized build:
 ./notarize.sh
 ```
 
-This produces `MLXControl-notarized.zip` ready for GitHub Releases.
-The credentials are stored in the local Keychain (never on the command line or in
-git). Generate an app-specific password at [appleid.apple.com](https://appleid.apple.com)
-→ Sign-In & Security → App-Specific Passwords. The Team ID is auto-detected from your
-signing certificate.
+This produces `MLXControl-notarized.zip` ready for GitHub Releases. Credentials are
+stored in the local Keychain (never on the command line or in git). Generate an
+app-specific password at [appleid.apple.com](https://appleid.apple.com) → Sign-In &
+Security → App-Specific Passwords. The Team ID is auto-detected from your signing
+certificate.
 
 ## Security
 
 - **No shell string interpolation** — all subprocess calls use `Process` with argument arrays
 - **Path validation** — model delete validates the repo ID format and confines removal to the HuggingFace cache directory
 - **Tool auto-detection** — `mlx_lm.server` and `hf` are located via PATH search, not hardcoded paths
-- **No network access except** HuggingFace API (search/metadata) and the local inference server
+- **No network access except** the HuggingFace API (search/metadata) and the local inference server
 
 ## License
 
